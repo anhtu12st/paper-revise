@@ -8,7 +8,7 @@ Complete examples for using MemXLNet-QA, from basic evaluation to advanced train
 
 ```python
 # Load a trained MemXLNet-QA model
-from src.memxlnet_qa import MemXLNetForQA
+from memxlnet.models import MemXLNetForQA
 from transformers import XLNetTokenizerFast
 
 # Load model and tokenizer (with memory tokens)
@@ -23,7 +23,7 @@ print(f"Tokenizer vocabulary size: {len(tokenizer)}")
 
 ```python
 import torch
-from src.data import create_evaluation_dataloader
+from memxlnet.data import create_evaluation_dataloader
 
 # Create evaluation pipeline
 eval_dataset, eval_dataloader = create_evaluation_dataloader(
@@ -125,7 +125,7 @@ evaluate_with_memory_simple(model, eval_dataloader, device, max_docs=5)
 ### Basic Training Setup
 
 ```python
-from src.train import TrainingConfig, XLNetRecurrentTrainer
+from memxlnet.training import TrainingConfig, XLNetRecurrentTrainer
 
 # Basic training configuration
 config = TrainingConfig(
@@ -270,7 +270,7 @@ print(f"- Max segments: {advanced_config.max_n_segs}")
 ### Custom Dataset Processing
 
 ```python
-from src.data import SquadLikeQADataset, configure_memory_tokens
+from memxlnet.data import SquadLikeQADataset, configure_memory_tokens
 from transformers import XLNetTokenizerFast
 
 # Setup tokenizer with memory tokens
@@ -304,7 +304,7 @@ for doc_id in custom_dataset.get_all_documents()[:3]:
 ### Time-Step-Major DataLoader Example
 
 ```python
-from src.data import TimeStepMajorDataLoader
+from memxlnet.data import TimeStepMajorDataLoader
 
 # Create time-step-major dataloader
 tsm_dataloader = TimeStepMajorDataLoader(
@@ -333,7 +333,7 @@ for i, time_step_batches in enumerate(tsm_dataloader):
 ### Cache Management Example
 
 ```python
-from src.data import process_and_cache_dataset, ChunkedCacheManager
+from memxlnet.data import process_and_cache_dataset, ChunkedCacheManager
 
 # Process and cache dataset
 cache_dir = "./cache/examples"
@@ -372,7 +372,7 @@ if total_chunks > 0:
 ### Complete Evaluation Pipeline
 
 ```python
-from src.evaluate import main as evaluate_main
+from memxlnet.evaluation.evaluator import main as evaluate_main
 import tempfile
 import json
 
@@ -414,7 +414,7 @@ finally:
 ```python
 def custom_evaluate(model, tokenizer, max_examples=50):
     """Custom evaluation function with detailed output."""
-    from src.data import create_evaluation_dataloader
+    from memxlnet.data import create_evaluation_dataloader
     import torch
 
     # Setup
@@ -624,7 +624,7 @@ def diagnose_model_loading(checkpoint_path):
     # Try loading
     print("\n=== Loading Test ===")
     try:
-        from src.memxlnet_qa import MemXLNetForQA
+        from memxlnet.models import MemXLNetForQA
         model = MemXLNetForQA.from_pretrained(checkpoint_path)
         print(f"✅ Model loaded successfully")
         print(f"  Memory tokens: {model.mem_token_count}")
@@ -665,7 +665,7 @@ def diagnose_data_processing():
         print(f"✅ Base tokenizer loaded: {len(tokenizer)} tokens")
 
         # Test memory token addition
-        from src.data import configure_memory_tokens
+        from memxlnet.data import configure_memory_tokens
         mem_config = configure_memory_tokens(tokenizer, 4)
         print(f"✅ Memory tokens added: {len(tokenizer)} tokens")
         print(f"  Read IDs: {mem_config['mem_read_ids']}")
@@ -677,7 +677,7 @@ def diagnose_data_processing():
 
     # Test dataset creation
     try:
-        from src.data import SquadLikeQADataset
+        from memxlnet.data import SquadLikeQADataset
         dataset = SquadLikeQADataset(
             split="validation",
             tokenizer=tokenizer,
@@ -696,7 +696,7 @@ def diagnose_data_processing():
 
     # Test time-step-major dataloader
     try:
-        from src.data import TimeStepMajorDataLoader
+        from memxlnet.data import TimeStepMajorDataLoader
         dataloader = TimeStepMajorDataLoader(
             dataset=dataset,
             batch_size=2,
@@ -727,7 +727,7 @@ def diagnose_configuration():
     print("=== Configuration Diagnostics ===")
 
     try:
-        from src.train import TrainingConfig
+        from memxlnet.training import TrainingConfig
 
         # Test basic configuration
         config = TrainingConfig()

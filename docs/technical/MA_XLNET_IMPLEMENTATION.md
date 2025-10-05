@@ -6,7 +6,7 @@ Successfully implemented enhanced Memory-Augmented XLNet (MA-XLNet) for multi-ho
 
 ## Key Features Implemented
 
-### 1. Differentiable Memory Module (`src/memory_modules.py`)
+### 1. Differentiable Memory Module (`src/memxlnet/models/memory_modules.py`)
 
 **DifferentiableMemory Class:**
 - Content-based addressing using cosine similarity
@@ -23,7 +23,7 @@ Successfully implemented enhanced Memory-Augmented XLNet (MA-XLNet) for multi-ho
 - Memory visualization utilities
 - State management and reset capabilities
 
-### 2. Enhanced MemXLNetForQA (`src/memxlnet_qa.py`)
+### 2. Enhanced MemXLNetForQA (`src/memxlnet/models/memxlnet_qa.py`)
 
 **Backward Compatible Extensions:**
 - Optional `use_differentiable_memory` flag (default=False)
@@ -38,7 +38,7 @@ Successfully implemented enhanced Memory-Augmented XLNet (MA-XLNet) for multi-ho
 - Memory state visualization support
 - Full backward compatibility with existing checkpoints
 
-### 3. Updated Training Configuration (`src/train.py`)
+### 3. Updated Training Configuration (`src/memxlnet/training/trainer.py`)
 
 **New Configuration Options:**
 ```python
@@ -50,7 +50,7 @@ enable_temporal_links: bool = False
 memory_slots: Optional[int] = None
 ```
 
-### 4. Multi-Hop Utilities (`src/multihop_utils.py`)
+### 4. Multi-Hop Utilities (`src/memxlnet/utils/multihop_utils.py`)
 
 **HopTracker:**
 - Tracks reasoning chains through memory operations
@@ -71,7 +71,7 @@ memory_slots: Optional[int] = None
 - Step-by-step reasoning trace
 - Reasoning chain export to JSON
 
-### 5. Comprehensive Testing (`tests/test_enhanced_memory.py`)
+### 5. Comprehensive Testing (`tests/unit/test_memory.py`)
 
 **Test Coverage:**
 - DifferentiableMemory operations

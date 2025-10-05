@@ -24,8 +24,13 @@ MemXLNet-QA is a memory-augmented XLNet implementation for long-context question
 ```
 paper-revise/
 ├── src/memxlnet/          # Main package (models, data, training, evaluation, utils)
-├── scripts/               # Executable scripts (train.py, evaluate.py, phase2_train.py)
-├── tests/                 # Test suite (unit/, integration/, regression/)
+├── scripts/               # Executable scripts
+│   ├── train.py                       # Basic training
+│   ├── evaluate.py                    # Model evaluation
+│   ├── phase2_train.py                # Phase 2 training (recommended)
+│   ├── train_memxlnet_squad.py        # Hub-integrated training
+│   └── preprocess_and_upload_to_hub.py  # Dataset preprocessing for Hub
+├── tests/                 # Test suite (unit/, integration/)
 ├── docs/                  # Documentation (api/, guides/, technical/)
 ├── notebooks/             # Interactive analysis notebooks
 ├── examples/              # Usage examples
@@ -64,6 +69,19 @@ python scripts/evaluate.py outputs/xlnet-squad-phase2-1/training_config.json
 
 # Run test suite
 pytest tests/
+```
+
+### HuggingFace Hub Integration
+```bash
+# ONE-TIME: Preprocess and upload dataset to Hub (requires 20GB+ RAM)
+# Edit scripts/preprocess_and_upload_to_hub.py to set your HUB_USERNAME first
+export HF_TOKEN='your_huggingface_token'
+python scripts/preprocess_and_upload_to_hub.py
+
+# FAST TRAINING: Use Hub-preprocessed datasets (requires only 4-6GB RAM)
+# Edit scripts/train_memxlnet_squad.py to set your HUB_USERNAME first
+python scripts/train_memxlnet_squad.py
+# This downloads preprocessed data from Hub and starts training in minutes!
 ```
 
 ### Verify Installation
@@ -107,6 +125,44 @@ Curriculum learning with increasing segment counts:
 - Creates subdirectories: `stage_1_segs_2/`, `stage_2_segs_4/`, etc.
 - See [Implementation Details](docs/technical/MA_XLNET_IMPLEMENTATION.md)
 
+### 5. Phase-2 Warmup Controls
+Fine-grained control over model warmup for stable memory-augmented training:
+
+#### `warmup_freeze_base_epochs` (default: 1)
+Freeze the base XLNet transformer for the first N epochs while training only memory components.
+- **Purpose**: Allows memory modules to learn without disrupting pretrained weights
+- **Recommended**: 1-2 epochs for stable initialization
+- **Example**: `warmup_freeze_base_epochs=1` freezes base for first epoch
+
+#### `warmup_disable_global_softmax_epochs` (default: 1)
+Disable document-level answer span aggregation for the first N epochs.
+- **Purpose**: Forces model to learn local (per-segment) predictions first
+- **Recommended**: 1 epoch before enabling global reasoning
+- **Example**: `warmup_disable_global_softmax_epochs=1` uses segment-level softmax initially
+
+#### `warmup_disable_any_positive_epochs` (default: 1)
+Disable "any-positive" extraction logic for the first N epochs.
+- **Purpose**: Simplifies training by using single-span extraction initially
+- **Recommended**: 1 epoch for gradual complexity increase
+- **Example**: `warmup_disable_any_positive_epochs=1` starts with simple extraction
+
+**Typical Usage:**
+```python
+config = TrainingConfig(
+    memory_num_tokens=16,
+    num_epochs=5,
+
+    # Warmup controls for stable training
+    warmup_freeze_base_epochs=1,           # Freeze base for epoch 1
+    warmup_disable_global_softmax_epochs=1,  # Local softmax for epoch 1
+    warmup_disable_any_positive_epochs=1,    # Simple extraction for epoch 1
+)
+```
+
+**Training Timeline:**
+- **Epoch 1**: Base frozen, segment-level predictions, simple extraction
+- **Epoch 2+**: All features enabled, full model training
+
 ## Key Configuration Parameters
 
 ```python
@@ -131,10 +187,15 @@ config = TrainingConfig(
     use_global_softmax=True,    # Global span selection
     no_answer_threshold=1.5,    # SQuAD v2 threshold
 
-    # HuggingFace Hub integration (optional)
-    hub_model_id="username/model-name",  # Hub repository ID
-    push_to_hub_on_save=True,            # Auto-push to Hub
+    # HuggingFace Hub integration - Models (optional)
+    hub_model_id="username/model-name",  # Hub repository ID for models
+    push_to_hub_on_save=True,            # Auto-push models to Hub
     hub_strategy="best_only",            # "best_only", "every_save", "end"
+
+    # HuggingFace Hub integration - Datasets (optional)
+    hub_dataset_id="username/memxlnet-squad-mem16",  # Preprocessed dataset repo
+    use_hub_dataset=True,                # Download preprocessed data from Hub
+    force_reprocess=False,               # Skip reprocessing if Hub data exists
 )
 ```
 
@@ -142,7 +203,7 @@ config = TrainingConfig(
 
 ## HuggingFace Hub Integration
 
-MemXLNet supports automatic model versioning and sharing via HuggingFace Hub.
+MemXLNet supports automatic model versioning **and** preprocessed dataset sharing via HuggingFace Hub.
 
 ### Setup
 ```bash
@@ -172,6 +233,41 @@ config = TrainingConfig(
 trainer = XLNetRecurrentTrainer(config)
 trainer.train()  # Automatically pushes best models to Hub
 ```
+
+### Training with Hub Datasets
+
+Download preprocessed datasets for faster training startup:
+
+```python
+from memxlnet.training import TrainingConfig, XLNetRecurrentTrainer
+
+config = TrainingConfig(
+    # Your training settings...
+    memory_num_tokens=16,
+    num_epochs=3,
+
+    # Hub dataset configuration (FAST: 2-5 min startup vs 30-60 min preprocessing)
+    hub_dataset_id="username/memxlnet-squad-mem16",  # Preprocessed data repo
+    use_hub_dataset=True,                            # Download from Hub
+    force_reprocess=False,                           # Use Hub data if available
+
+    # Hub model configuration (optional)
+    hub_model_id="username/memxlnet-squad",          # Model output repo
+    push_to_hub_on_save=True,                        # Auto-push models
+    hub_strategy="best_only",
+)
+
+trainer = XLNetRecurrentTrainer(config)
+trainer.train()  # Fast startup with preprocessed Hub data!
+```
+
+**Benefits:**
+- **Faster startup**: 2-5 minutes vs 30-60 minutes for preprocessing
+- **Lower RAM**: 4-6GB vs 20-30GB for preprocessing
+- **Reproducibility**: Same preprocessed data across all runs
+
+**See:** `scripts/preprocess_and_upload_to_hub.py` for uploading datasets
+**See:** `scripts/train_memxlnet_squad.py` for complete example
 
 ### Hub Push Strategies
 - **`best_only`**: Only push when a new best model is found (recommended)

@@ -62,7 +62,7 @@ if original_answer.lower().strip() not in reconstructed_answer.lower().strip():
 A comprehensive module providing Unicode-aware text processing:
 
 ```python
-from src.text_utils import (
+from memxlnet.data.text_utils import (
     normalize_unicode,
     normalize_answer_for_comparison,
     validate_answer_positions,
@@ -233,7 +233,7 @@ UNICODE_TEST_CASES = [
 #### New Import Requirements
 
 ```python
-from src.text_utils import (
+from memxlnet.data.text_utils import (
     normalize_unicode,
     validate_answer_positions,
     fix_answer_positions,
@@ -317,7 +317,7 @@ The test suite provides detailed metrics:
 ### Basic Unicode Text Processing
 
 ```python
-from src.text_utils import normalize_unicode, normalize_answer_for_comparison
+from memxlnet.data.text_utils import normalize_unicode, normalize_answer_for_comparison
 
 # Normalize Unicode text
 text = "Le café est très bon"
@@ -335,7 +335,7 @@ print(f"Match: {norm1 == norm2}")  # True after normalization
 ### Answer Position Validation
 
 ```python
-from src.text_utils import validate_answer_positions, fix_answer_positions
+from memxlnet.data.text_utils import validate_answer_positions, fix_answer_positions
 
 context = "François Mitterrand était président."
 answer = "François"
@@ -355,7 +355,7 @@ if not is_valid:
 ### Enhanced Dataset Processing
 
 ```python
-from src.data import SquadLikeQADataset
+from memxlnet.data import SquadLikeQADataset
 from transformers import XLNetTokenizerFast
 
 # Create tokenizer
@@ -379,7 +379,7 @@ print(f"Dataset size: {len(dataset)}")
 ### Running Unicode Tests
 
 ```python
-from src.text_utils import run_unicode_tests
+from memxlnet.data.text_utils import run_unicode_tests
 
 # Run comprehensive test suite
 test_results = run_unicode_tests()
@@ -406,7 +406,7 @@ Add text utilities import to your processing code:
 
 ```python
 # Add to existing imports
-from src.text_utils import (
+from memxlnet.data.text_utils import (
     normalize_unicode,
     normalize_answer_for_comparison,
     validate_answer_positions
@@ -423,7 +423,7 @@ if original_answer.lower().strip() not in reconstructed_answer.lower().strip():
     # Mark as invalid
 
 # New validation
-from src.text_utils import compare_answers_fuzzy
+from memxlnet.data.text_utils import compare_answers_fuzzy
 
 normalized_original = normalize_answer_for_comparison(original_answer)
 normalized_reconstructed = normalize_answer_for_comparison(reconstructed_answer)
@@ -450,7 +450,7 @@ import shutil
 shutil.rmtree('./cache', ignore_errors=True)
 
 # Regenerate with Unicode support
-from src.data import process_and_cache_dataset
+from memxlnet.data import process_and_cache_dataset
 
 process_and_cache_dataset(
     dataset_name='squad_v2',
@@ -506,7 +506,7 @@ else:
 
 ```python
 # Run Unicode tests regularly
-from src.text_utils import run_unicode_tests
+from memxlnet.data.text_utils import run_unicode_tests
 
 def test_unicode_support():
     results = run_unicode_tests()
@@ -539,14 +539,14 @@ if not validation_result['valid']:
 
 ```python
 # Debug Unicode normalization
-from src.text_utils import normalize_unicode
+from memxlnet.data.text_utils import normalize_unicode
 text = "problematic_text"
 normalized = normalize_unicode(text)
 print(f"Original: {repr(text)}")
 print(f"Normalized: {repr(normalized)}")
 
 # Debug position mapping
-from src.text_utils import validate_answer_positions
+from memxlnet.data.text_utils import validate_answer_positions
 is_valid = validate_answer_positions(context, answer, start, end)
 if not is_valid:
     extracted = context[start:end]

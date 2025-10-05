@@ -186,7 +186,7 @@ while offsets[token_start][0] <= start_char:  # Should be <
 ### For New Projects
 ```python
 # Recommended imports
-from src.text_utils import (
+from memxlnet.data.text_utils import (
     normalize_unicode,
     normalize_answer_for_comparison,
     validate_answer_positions
@@ -204,7 +204,7 @@ import shutil
 shutil.rmtree('./cache', ignore_errors=True)
 
 # Process data with new improvements
-from src.data import process_and_cache_dataset
+from memxlnet.data import process_and_cache_dataset
 process_and_cache_dataset(...)  # Automatic Unicode handling
 ```
 
@@ -228,7 +228,7 @@ Overall Success:     49/49 passed (100%)
 ### Continuous Validation
 ```python
 # Automated test execution
-from src.text_utils import run_unicode_tests
+from memxlnet.data.text_utils import run_unicode_tests
 
 def validate_unicode_support():
     results = run_unicode_tests()
@@ -297,15 +297,15 @@ validate_unicode_support()
 ### Debug Tools
 ```python
 # Debug Unicode issues
-from src.text_utils import normalize_unicode
+from memxlnet.data.text_utils import normalize_unicode
 normalized = normalize_unicode(problematic_text)
 
 # Debug position issues
-from src.text_utils import validate_answer_positions
+from memxlnet.data.text_utils import validate_answer_positions
 is_valid = validate_answer_positions(context, answer, start, end)
 
 # Comprehensive testing
-from src.text_utils import run_unicode_tests
+from memxlnet.data.text_utils import run_unicode_tests
 results = run_unicode_tests()
 ```
 

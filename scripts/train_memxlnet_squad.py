@@ -110,7 +110,7 @@ def get_training_config():
 
         # ===== Training Hyperparameters =====
         num_epochs=4,
-        train_batch_size=4,   # Reduced from 16 to fit in 15GB GPU (OOM fix)
+        train_batch_size=8,   # Reduced from 16 to fit in 15GB GPU (OOM fix)
         eval_batch_size=16,   # Reduced from 32 for safety
         learning_rate=3e-5,
         weight_decay=0.01,
@@ -118,7 +118,7 @@ def get_training_config():
         max_grad_norm=1.0,
 
         # ===== Training Schedule =====
-        gradient_accumulation_steps=4,  # Increased from 1 (maintains effective batch size of 16)
+        gradient_accumulation_steps=2,  # Increased from 1 (maintains effective batch size of 16)
         eval_steps=6000,
         save_steps=10000,
         logging_steps=500,

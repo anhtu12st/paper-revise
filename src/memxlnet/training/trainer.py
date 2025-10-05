@@ -758,6 +758,7 @@ class XLNetRecurrentTrainer:
         all_contexts: list[str],
         all_input_ids: list[list[int]] | None = None,
         all_token_type_ids: list[list[int]] | None = None,
+        all_cls_indices: list[int] | None = None,
         no_answer_threshold: float = 0.0,
         max_answer_length: int = 30,
         n_best_size: int = 20,
@@ -801,6 +802,8 @@ class XLNetRecurrentTrainer:
             lens.append(len(all_input_ids))
         if all_token_type_ids is not None:
             lens.append(len(all_token_type_ids))
+        if all_cls_indices is not None:
+            lens.append(len(all_cls_indices))
         min_length = min(lens)
 
         if min_length < len(all_start_logits):
@@ -814,6 +817,8 @@ class XLNetRecurrentTrainer:
                 all_input_ids = all_input_ids[:min_length]
             if all_token_type_ids is not None:
                 all_token_type_ids = all_token_type_ids[:min_length]
+            if all_cls_indices is not None:
+                all_cls_indices = all_cls_indices[:min_length]
 
         for i, example_id in enumerate(all_example_ids):
             # Use actual context from dataset if available, otherwise use provided context
@@ -829,6 +834,8 @@ class XLNetRecurrentTrainer:
                 entry["input_ids"] = all_input_ids[i]
             if all_token_type_ids is not None and i < len(all_token_type_ids):
                 entry["token_type_ids"] = all_token_type_ids[i]
+            if all_cls_indices is not None and i < len(all_cls_indices):
+                entry["cls_index"] = all_cls_indices[i]
             logits_by_example[example_id].append(entry)
 
         for example_id, example_logits in logits_by_example.items():
@@ -903,12 +910,17 @@ class XLNetRecurrentTrainer:
                     else float(start_l[-1]) + float(end_l[-1])
                 )
 
-            cls_index = None
-            if ids is not None and isinstance(ids, list):
-                cls_token_id = self.tokenizer.cls_token_id
-                cls_positions = [i for i, tok in enumerate(ids) if tok == cls_token_id]
-                if cls_positions:
-                    cls_index = cls_positions[-1]
+            # ✅ FIXED: Use actual CLS index from batch (like test_evaluation.py)
+            cls_index = chunk_data.get("cls_index", None)
+
+            # Fallback: If cls_index not in batch, search for it (legacy compatibility)
+            if cls_index is None:
+                if ids is not None and isinstance(ids, list):
+                    cls_token_id = self.tokenizer.cls_token_id
+                    cls_positions = [i for i, tok in enumerate(ids) if tok == cls_token_id]
+                    if cls_positions:
+                        cls_index = cls_positions[-1]
+
             segment_no_answer_score = _robust_no_answer_score(start_logits, end_logits, ids, tts, offset_mapping)
 
             # Find best answer candidate in THIS segment only
@@ -1030,18 +1042,21 @@ class XLNetRecurrentTrainer:
             if end_logits.ndim > 1:
                 end_logits = end_logits.flatten()
 
-            # Get no-answer score using the true CLS index (accounting for memory tokens)
-            cls_index = None
-            try:
-                if ids is not None and isinstance(ids, list):
-                    cls_token_id = self.tokenizer.cls_token_id
-                    cls_positions = [i for i, tok in enumerate(ids) if tok == cls_token_id]
-                    if cls_positions:
-                        cls_index = cls_positions[-1]
-                if cls_index is None:
+            # ✅ FIXED: Use actual CLS index from batch (like test_evaluation.py)
+            cls_index = chunk_data.get("cls_index", None)
+
+            # Fallback: If cls_index not in batch, search for it (legacy compatibility)
+            if cls_index is None:
+                try:
+                    if ids is not None and isinstance(ids, list):
+                        cls_token_id = self.tokenizer.cls_token_id
+                        cls_positions = [i for i, tok in enumerate(ids) if tok == cls_token_id]
+                        if cls_positions:
+                            cls_index = cls_positions[-1]
+                    if cls_index is None:
+                        cls_index = len(start_logits) - 1
+                except Exception:
                     cls_index = len(start_logits) - 1
-            except Exception:
-                cls_index = len(start_logits) - 1
 
             chunk_no_answer_score = float(start_logits[cls_index]) + float(end_logits[cls_index])
             if no_answer_score is None or chunk_no_answer_score > no_answer_score:
@@ -1152,6 +1167,7 @@ class XLNetRecurrentTrainer:
         all_contexts = []
         all_input_ids = []
         all_token_type_ids = []
+        all_cls_indices = []
 
         logger.info("🔍 Starting evaluation...")
 
@@ -1173,6 +1189,8 @@ class XLNetRecurrentTrainer:
                     all_input_ids.extend(doc_predictions["input_ids"])
                 if "token_type_ids" in doc_predictions:
                     all_token_type_ids.extend(doc_predictions["token_type_ids"])
+                if "cls_indices" in doc_predictions:
+                    all_cls_indices.extend(doc_predictions["cls_indices"])
 
                 if batch_idx % 10 == 0:
                     logger.info(f"Evaluated {batch_idx + 1}/{len(eval_dataloader)} batches")
@@ -1209,6 +1227,7 @@ class XLNetRecurrentTrainer:
                     all_contexts,
                     all_input_ids if all_input_ids else None,
                     all_token_type_ids if all_token_type_ids else None,
+                    all_cls_indices if all_cls_indices else None,
                     no_answer_threshold=self.config.no_answer_threshold,
                 )
                 self.config.use_any_positive_logic = orig_any_pos
@@ -1283,6 +1302,7 @@ class XLNetRecurrentTrainer:
         doc_contexts = []
         doc_input_ids = []
         doc_token_type_ids = []
+        doc_cls_indices = []
 
         # Wrapper path with explicit memory
         if hasattr(self.model, "get_initial_memory"):
@@ -1352,6 +1372,15 @@ class XLNetRecurrentTrainer:
                     )
                     chunk_token_type_ids = chunk.get("token_type_ids", None)
                     ids_cpu = input_ids.cpu().tolist()
+
+                    # ✅ Get CLS indices from batch (like test_evaluation.py)
+                    cls_indices_raw = chunk.get("cls_index", [])
+                    chunk_cls_indices: list[int] = (
+                        cls_indices_raw.tolist()
+                        if isinstance(cls_indices_raw, torch.Tensor)
+                        else (cls_indices_raw if isinstance(cls_indices_raw, list) else [])
+                    )
+
                     if chunk_offsets:
                         doc_offset_mappings.extend([chunk_offsets[i] for i, a in enumerate(act_list) if a])
                     if chunk_contexts:
@@ -1361,6 +1390,8 @@ class XLNetRecurrentTrainer:
                     if chunk_token_type_ids is not None:
                         tts_cpu = chunk_token_type_ids.cpu().tolist()
                         doc_token_type_ids.extend([tts_cpu[i] for i, a in enumerate(act_list) if a])
+                    if chunk_cls_indices:
+                        doc_cls_indices.extend([chunk_cls_indices[i] for i, a in enumerate(act_list) if a])
 
                 for i, (ex_id, a) in enumerate(zip(example_ids, document_mask.tolist())):
                     if a:
@@ -1375,6 +1406,7 @@ class XLNetRecurrentTrainer:
                 "contexts": doc_contexts,
                 "input_ids": doc_input_ids,
                 "token_type_ids": doc_token_type_ids,
+                "cls_indices": doc_cls_indices,
             }
             return avg_loss, predictions_data
 

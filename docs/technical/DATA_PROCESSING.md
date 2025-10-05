@@ -11,9 +11,10 @@ This document provides a comprehensive overview of how data is transformed, proc
 5. [Time-Step-Major Batching](#time-step-major-batching)
 6. [Answer Span Mapping](#answer-span-mapping)
 7. [Caching and Efficiency](#caching-and-efficiency)
-8. [Training vs Evaluation Differences](#training-vs-evaluation-differences)
-9. [Performance Optimizations](#performance-optimizations)
-10. [Common Issues and Solutions](#common-issues-and-solutions)
+8. [HuggingFace Hub Dataset Integration](#huggingface-hub-dataset-integration)
+9. [Training vs Evaluation Differences](#training-vs-evaluation-differences)
+10. [Performance Optimizations](#performance-optimizations)
+11. [Common Issues and Solutions](#common-issues-and-solutions)
 
 ## Overview
 
@@ -389,6 +390,135 @@ def process_and_cache_dataset(dataset_name, split, cache_dir, tokenizer, ...):
     cache_manager.save_chunk(features, cache_key, split, 0)
     return len(features)
 ```
+
+## HuggingFace Hub Dataset Integration
+
+MemXLNet-QA supports uploading and downloading preprocessed datasets to/from HuggingFace Hub, dramatically reducing preprocessing time and memory usage for subsequent training runs.
+
+### Benefits of Hub Datasets
+
+| Approach | RAM Usage | Processing Time | Workflow |
+|----------|-----------|-----------------|----------|
+| **Local Processing** | 20-30GB | 30-60 minutes | Process every time |
+| **Hub Datasets** | 4-6GB | 2-5 minutes | Download preprocessed data |
+
+### Uploading Preprocessed Datasets to Hub
+
+Use `upload_processed_dataset_to_hub()` to preprocess once and share across runs:
+
+```python
+from memxlnet.data import upload_processed_dataset_to_hub
+from transformers import XLNetTokenizerFast
+
+# Configure tokenizer with memory tokens
+tokenizer = XLNetTokenizerFast.from_pretrained("xlnet-base-cased")
+from memxlnet.data import configure_memory_tokens
+mem_config = configure_memory_tokens(tokenizer, memory_num_tokens=16)
+
+# Upload preprocessed dataset to Hub
+upload_processed_dataset_to_hub(
+    dataset_name="squad_v2",              # Source dataset
+    splits=["train", "validation"],       # Splits to process
+    tokenizer=tokenizer,                  # Configured tokenizer
+    max_seq_length=384,
+    doc_stride=64,
+    max_n_segs=None,                      # Process all segments
+    hub_dataset_id="username/memxlnet-squad-mem16",  # Hub repo
+    hub_private=True,                     # Private repository
+    max_train_samples=None,               # Process full dataset
+    max_eval_samples=None,
+    cache_dir="./.cache"
+)
+```
+
+### Downloading Preprocessed Datasets from Hub
+
+Use `load_dataset_from_hub()` for fast training startup:
+
+```python
+from memxlnet.data import load_dataset_from_hub
+
+# Download preprocessed dataset from Hub
+dataset = load_dataset_from_hub(
+    hub_dataset_id="username/memxlnet-squad-mem16",
+    split="train",
+    cache_dir="./.cache"
+)
+
+print(f"Loaded {len(dataset)} preprocessed examples from Hub")
+```
+
+### Training Configuration with Hub Datasets
+
+Configure `TrainingConfig` to automatically use Hub datasets:
+
+```python
+from memxlnet.training import TrainingConfig
+
+config = TrainingConfig(
+    # Hub dataset configuration
+    hub_dataset_id="username/memxlnet-squad-mem16",  # Hub repository
+    use_hub_dataset=True,          # Try loading from Hub first
+    force_reprocess=False,          # Skip reprocessing if Hub data exists
+
+    # Model and training settings
+    memory_num_tokens=16,           # Must match preprocessed dataset!
+    max_seq_length=384,
+    doc_stride=64,
+    num_epochs=3,
+)
+
+# Trainer will automatically download from Hub if available
+trainer = XLNetRecurrentTrainer(config)
+trainer.train()  # Fast startup - no preprocessing needed!
+```
+
+### Hub Dataset Workflow
+
+**One-time preprocessing (on high-RAM machine):**
+```bash
+# Preprocess and upload to Hub
+python scripts/preprocess_and_upload_to_hub.py
+```
+
+**Fast training startup (on any machine):**
+```python
+config = TrainingConfig(
+    hub_dataset_id="username/memxlnet-squad-mem16",
+    use_hub_dataset=True,  # Download preprocessed data
+)
+trainer = XLNetRecurrentTrainer(config)
+trainer.train()  # Starts training in minutes!
+```
+
+### Cache Priority Order
+
+The data loading system follows this priority:
+
+1. **Hub Dataset** (if `use_hub_dataset=True` and `hub_dataset_id` specified)
+2. **Local Cache** (if valid cache exists in `cache_dir`)
+3. **Fresh Processing** (if above fail or `force_reprocess=True`)
+
+```python
+# Explicit control over data source
+config = TrainingConfig(
+    use_hub_dataset=True,       # Try Hub first
+    force_reprocess=False,      # Don't reprocess if Hub/cache available
+    hub_dataset_id="username/memxlnet-squad-mem16",
+)
+```
+
+### Important Considerations
+
+- **Memory tokens must match**: Hub dataset memory token count must match training config
+- **Private repositories**: Set `hub_private=True` when uploading to keep datasets private
+- **HF_TOKEN required**: Set `HF_TOKEN` environment variable for Hub operations
+- **Dataset versioning**: Use different Hub repos for different configurations (mem8, mem16, mem32)
+
+Example naming convention:
+- `username/memxlnet-squad-mem8` - 8 memory tokens
+- `username/memxlnet-squad-mem16` - 16 memory tokens
+- `username/memxlnet-squad-mem32` - 32 memory tokens
 
 ## Training vs Evaluation Differences
 

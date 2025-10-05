@@ -5,7 +5,7 @@
 ### 🚀 Quick Setup
 
 ```python
-from src.memxlnet_qa import MemXLNetForQA
+from memxlnet.models import MemXLNetForQA
 from transformers import XLNetForQuestionAnsweringSimple
 
 # Load base model
@@ -35,7 +35,7 @@ model = MemXLNetForQA(
 ### 🔧 Training Configuration
 
 ```python
-from src.train import TrainingConfig
+from memxlnet.training import TrainingConfig
 
 config = TrainingConfig(
     # Model
@@ -97,7 +97,7 @@ config = TrainingConfig(
 ### 🔍 Multi-hop Reasoning
 
 ```python
-from src.multihop_utils import HopTracker
+from memxlnet.utils.multihop_utils import HopTracker
 
 # Track reasoning chains
 tracker = HopTracker()
@@ -186,7 +186,7 @@ model_new = MemXLNetForQA(
 ### 📊 Memory Visualization
 
 ```python
-from src.multihop_utils import MemoryVisualizer
+from memxlnet.utils.multihop_utils import MemoryVisualizer
 
 if model.memory_controller:
     viz_data = model.memory_controller.visualize_memory()
@@ -227,17 +227,17 @@ assert 'memory_info' not in outputs_compat, "Should not have memory_info"
 | `src/memxlnet_qa.py` | Enhanced model wrapper |
 | `src/multihop_utils.py` | Reasoning utilities |
 | `examples/multihop_ma_xlnet.py` | Usage examples |
-| `tests/test_enhanced_memory.py` | Test suite |
+| `tests/unit/test_memory.py` | Test suite |
 
 ### 🎯 Quick Validation
 
 ```bash
 # Run tests
-python tests/test_enhanced_memory.py
+python tests/unit/test_memory.py
 
 # Test example
 python examples/multihop_ma_xlnet.py
 
 # Check imports
-python -c "from src.memxlnet_qa import MemXLNetForQA; print('✅ Ready')"
+python -c "from memxlnet.models import MemXLNetForQA; print('✅ Ready')"
 ```

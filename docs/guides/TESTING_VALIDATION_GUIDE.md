@@ -40,7 +40,7 @@ jupyter notebook notebooks/data_processing.ipynb
 python -c "
 import sys, os
 sys.path.insert(0, 'src')
-from text_utils import run_unicode_tests
+from memxlnet.data.text_utils import run_unicode_tests
 results = run_unicode_tests()
 print(f'Passed: {sum(1 for r in results if r[\"normalized_match\"])}/{len(results)}')
 "
@@ -64,8 +64,7 @@ The main test suite is located in `notebooks/data_processing.ipynb` with the fol
 ```python
 # Import test utilities
 import sys, os
-sys.path.insert(0, os.path.join(os.getcwd(), '..', 'src'))
-from text_utils import run_unicode_tests, validate_answer_positions
+from memxlnet.data.text_utils import run_unicode_tests, validate_answer_positions
 
 # Run Unicode test suite
 unicode_results = run_unicode_tests()
@@ -94,7 +93,7 @@ The Unicode test suite covers:
 ### Running Unicode Tests
 
 ```python
-from src.text_utils import run_unicode_tests, UNICODE_TEST_CASES
+from memxlnet.data.text_utils import run_unicode_tests, UNICODE_TEST_CASES
 
 # Run predefined test cases
 results = run_unicode_tests()
@@ -113,7 +112,7 @@ for result in results:
 ### Custom Unicode Tests
 
 ```python
-from src.text_utils import (
+from memxlnet.data.text_utils import (
     normalize_unicode,
     find_answer_span_with_normalization,
     validate_answer_positions
@@ -162,7 +161,7 @@ for test in custom_tests:
 ### Testing Answer Position Accuracy
 
 ```python
-from src.text_utils import validate_answer_mapping
+from memxlnet.data.text_utils import validate_answer_mapping
 from transformers import XLNetTokenizerFast
 
 # Create tokenizer
@@ -218,7 +217,7 @@ for i, example in enumerate(test_examples):
 ### Edge Case Testing
 
 ```python
-from src.text_utils import validate_answer_positions, fix_answer_positions
+from memxlnet.data.text_utils import validate_answer_positions, fix_answer_positions
 
 # Test edge cases
 edge_cases = [
@@ -290,7 +289,7 @@ for case in edge_cases:
 ### Full Pipeline Testing
 
 ```python
-from src.data import SquadLikeQADataset, create_dataset_from_cache
+from memxlnet.data import SquadLikeQADataset, create_dataset_from_cache
 from transformers import XLNetTokenizerFast
 
 # Test data processing pipeline
@@ -350,7 +349,7 @@ print(f"Data processing test: {'PASSED' if success else 'FAILED'}")
 ### Cache Integrity Testing
 
 ```python
-from src.data import ChunkedCacheManager, process_and_cache_dataset
+from memxlnet.data import ChunkedCacheManager, process_and_cache_dataset
 
 def test_cache_integrity():
     cache_dir = './test_cache'
@@ -410,7 +409,7 @@ print(f"Cache integrity test: {'PASSED' if cache_success else 'FAILED'}")
 
 ```python
 def test_answer_validation_strategies():
-    from src.text_utils import (
+    from memxlnet.data.text_utils import (
         normalize_answer_for_comparison,
         compare_answers_fuzzy
     )
@@ -500,7 +499,7 @@ def performance_test():
     process = psutil.Process(os.getpid())
 
     # Test Unicode normalization performance
-    from src.text_utils import normalize_unicode, normalize_answer_for_comparison
+    from memxlnet.data.text_utils import normalize_unicode, normalize_answer_for_comparison
 
     test_texts = [
         "Le café de la rue Saint-Honoré est très bon.",
@@ -588,7 +587,7 @@ except UnicodeError as e:
 
 ```python
 # Debug position mapping issues
-from src.text_utils import validate_answer_positions, fix_answer_positions
+from memxlnet.data.text_utils import validate_answer_positions, fix_answer_positions
 
 context = "problematic context"
 answer = "answer"
@@ -651,7 +650,7 @@ def verify_test_environment():
 
     # Check text_utils availability
     try:
-        from src.text_utils import normalize_unicode
+        from memxlnet.data.text_utils import normalize_unicode
     except ImportError:
         issues.append("Cannot import src.text_utils")
 
@@ -699,14 +698,14 @@ def create_custom_test(name, test_function, expected_result):
 
 # Example custom tests
 def test_custom_unicode():
-    from src.text_utils import normalize_unicode
+    from memxlnet.data.text_utils import normalize_unicode
     # Test your specific Unicode case
     text = "your_unicode_text"
     normalized = normalize_unicode(text)
     return len(normalized) > 0  # Or your specific test condition
 
 def test_custom_position():
-    from src.text_utils import validate_answer_positions
+    from memxlnet.data.text_utils import validate_answer_positions
     # Test your specific position case
     return validate_answer_positions("your context", "your answer", 0, 10)
 

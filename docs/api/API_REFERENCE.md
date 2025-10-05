@@ -19,7 +19,7 @@ This document provides comprehensive API documentation for all data processing f
 
 ### SquadLikeQADataset
 
-**Location**: `src/data.py`
+**Location**: `src/memxlnet/data/dataset.py`
 
 Enhanced SQuAD v2 dataset preprocessor with document tracking and time-step-major support.
 
@@ -116,7 +116,7 @@ print(f"Feature keys: {list(feature.keys())}")
 
 ### TimeStepMajorDataLoader
 
-**Location**: `src/data.py`
+**Location**: `src/memxlnet/data/dataset.py`
 
 DataLoader that reorganizes regular batches into time-step-major format for proper memory state propagation.
 
@@ -186,7 +186,7 @@ for doc_batch_idx, time_step_batches in enumerate(dataloader):
 
 ### ChunkedCacheManager
 
-**Location**: `src/data.py`
+**Location**: `src/memxlnet/data/dataset.py`
 
 Manages chunked caching of large datasets for memory-efficient processing.
 
@@ -278,7 +278,7 @@ else:
 
 ### process_and_cache_dataset
 
-**Location**: `src/data.py`
+**Location**: `src/memxlnet/data/dataset.py`
 
 Process and cache dataset features for memory-efficient loading.
 
@@ -346,7 +346,7 @@ print(f"Processed and cached {total_features} features")
 
 ### create_dataset_from_cache
 
-**Location**: `src/data.py`
+**Location**: `src/memxlnet/data/dataset.py`
 
 Create dataset from cache or fresh processing.
 
@@ -401,7 +401,7 @@ print(f"Created dataset with {len(dataset)} features")
 
 ### create_evaluation_dataloader
 
-**Location**: `src/data.py`
+**Location**: `src/memxlnet/data/dataset.py`
 
 Convenience function to create evaluation dataset and dataloader using proper pipeline.
 
@@ -473,6 +473,149 @@ for time_step_batches in eval_dataloader:
         # Process batch with model
         pass
 ```
+
+### upload_processed_dataset_to_hub
+
+**Location**: `src/memxlnet/data/dataset.py`
+
+Upload preprocessed dataset to HuggingFace Hub for fast loading in subsequent training runs.
+
+```python
+def upload_processed_dataset_to_hub(
+    dataset_name: str,
+    splits: list[str],
+    tokenizer: PreTrainedTokenizerBase,
+    max_seq_length: int,
+    doc_stride: int,
+    max_n_segs: int | None,
+    hub_dataset_id: str,
+    hub_private: bool = True,
+    max_train_samples: int | None = None,
+    max_eval_samples: int | None = None,
+    cache_dir: str = "./.cache",
+    hf_token: str | None = None,
+) -> None
+```
+
+**Parameters**:
+- `dataset_name` (str): Source dataset name (e.g., "squad_v2")
+- `splits` (list[str]): Dataset splits to process and upload (e.g., ["train", "validation"])
+- `tokenizer` (PreTrainedTokenizerBase): Tokenizer with memory tokens configured
+- `max_seq_length` (int): Maximum sequence length for tokenization
+- `doc_stride` (int): Document stride for overlapping segments
+- `max_n_segs` (int | None): Maximum segments per document (None for unlimited)
+- `hub_dataset_id` (str): HuggingFace Hub repository ID (e.g., "username/memxlnet-squad-mem16")
+- `hub_private` (bool): Create private repository. Default: True
+- `max_train_samples` (int | None): Limit training samples (None for all). Default: None
+- `max_eval_samples` (int | None): Limit evaluation samples (None for all). Default: None
+- `cache_dir` (str): Directory for local caching. Default: "./.cache"
+- `hf_token` (str | None): HuggingFace token (defaults to HF_TOKEN env variable). Default: None
+
+**Returns**:
+- None (uploads to Hub)
+
+**Description**:
+This function preprocesses a dataset once on a high-RAM machine and uploads it to HuggingFace Hub, allowing subsequent training runs to download preprocessed data instead of reprocessing. This dramatically reduces RAM requirements (from 20-30GB to 4-6GB) and startup time (from 30-60 minutes to 2-5 minutes).
+
+**Example**:
+```python
+from memxlnet.data import upload_processed_dataset_to_hub, configure_memory_tokens
+from transformers import XLNetTokenizerFast
+import os
+
+# Set HuggingFace token
+os.environ["HF_TOKEN"] = "your_token_here"
+
+# Configure tokenizer with memory tokens
+tokenizer = XLNetTokenizerFast.from_pretrained("xlnet-base-cased")
+mem_config = configure_memory_tokens(tokenizer, 16)
+
+# Preprocess and upload to Hub
+upload_processed_dataset_to_hub(
+    dataset_name="squad_v2",
+    splits=["train", "validation"],
+    tokenizer=tokenizer,
+    max_seq_length=384,
+    doc_stride=64,
+    max_n_segs=None,
+    hub_dataset_id="username/memxlnet-squad-mem16",
+    hub_private=True,  # Private repository
+    cache_dir="./.cache"
+)
+
+print("Dataset uploaded to Hub!")
+```
+
+**See Also**:
+- `load_dataset_from_hub()` - Download preprocessed dataset from Hub
+- `scripts/preprocess_and_upload_to_hub.py` - Batch preprocessing script
+
+### load_dataset_from_hub
+
+**Location**: `src/memxlnet/data/dataset.py`
+
+Download preprocessed dataset from HuggingFace Hub for fast training startup.
+
+```python
+def load_dataset_from_hub(
+    hub_dataset_id: str,
+    split: str,
+    cache_dir: str = "./.cache",
+    hf_token: str | None = None,
+) -> SquadLikeQADataset
+```
+
+**Parameters**:
+- `hub_dataset_id` (str): HuggingFace Hub repository ID (e.g., "username/memxlnet-squad-mem16")
+- `split` (str): Dataset split to load ("train" or "validation")
+- `cache_dir` (str): Directory for local caching. Default: "./.cache"
+- `hf_token` (str | None): HuggingFace token (defaults to HF_TOKEN env variable). Default: None
+
+**Returns**:
+- `SquadLikeQADataset`: Ready-to-use dataset with preprocessed features
+
+**Description**:
+Downloads preprocessed dataset from HuggingFace Hub, avoiding expensive local preprocessing. This enables fast training startup with minimal RAM usage. The dataset is cached locally after first download.
+
+**Example**:
+```python
+from memxlnet.data import load_dataset_from_hub, create_dataloader
+
+# Download preprocessed dataset from Hub
+train_dataset = load_dataset_from_hub(
+    hub_dataset_id="username/memxlnet-squad-mem16",
+    split="train",
+    cache_dir="./.cache"
+)
+
+print(f"Loaded {len(train_dataset)} preprocessed features from Hub")
+
+# Create dataloader
+train_loader = create_dataloader(
+    train_dataset,
+    batch_size=8,
+    shuffle=True
+)
+```
+
+**Usage in Training**:
+```python
+from memxlnet.training import TrainingConfig, XLNetRecurrentTrainer
+
+config = TrainingConfig(
+    hub_dataset_id="username/memxlnet-squad-mem16",
+    use_hub_dataset=True,  # Automatically uses load_dataset_from_hub()
+    memory_num_tokens=16,
+    num_epochs=3,
+)
+
+trainer = XLNetRecurrentTrainer(config)
+trainer.train()  # Fast startup - downloads from Hub!
+```
+
+**See Also**:
+- `upload_processed_dataset_to_hub()` - Upload preprocessed dataset to Hub
+- `TrainingConfig.use_hub_dataset` - Auto-loading in training pipeline
 
 ## Text Utilities (Unicode & Position Mapping)
 
@@ -675,7 +818,7 @@ if not validate_answer_positions(context, answer_text, start_char, end_char):
 
 ### configure_memory_tokens
 
-**Location**: `src/data.py`
+**Location**: `src/memxlnet/data/dataset.py`
 
 Add memory read/write special tokens to the tokenizer and return their ids.
 
@@ -720,7 +863,7 @@ print(f"Write token IDs: {mem_config['mem_write_ids']}") # [32004, 32005, 32006,
 
 ### MemoryCollateConfig
 
-**Location**: `src/data.py`
+**Location**: `src/memxlnet/data/dataset.py`
 
 Configuration dataclass for memory-aware collation.
 
@@ -765,7 +908,7 @@ collate_config = MemoryCollateConfig(
 
 ### _memory_aware_collate_fn
 
-**Location**: `src/data.py`
+**Location**: `src/memxlnet/data/dataset.py`
 
 Enhanced collate function for time-step-major batching with memory support.
 
@@ -806,7 +949,7 @@ print(f"Document mask: {collated['document_mask']}")
 
 ### create_dataloader
 
-**Location**: `src/data.py`
+**Location**: `src/memxlnet/data/dataset.py`
 
 Create dataloader with optional time-step-major batching.
 
@@ -864,7 +1007,7 @@ for batch_data in dataloader:
 
 ### TrainingConfig
 
-**Location**: `src/train.py`
+**Location**: `src/memxlnet/training/trainer.py`
 
 Training configuration with all hyperparameters and settings.
 
@@ -971,7 +1114,7 @@ alias_config = TrainingConfig(
 
 ### f1_score
 
-**Location**: `src/train.py`
+**Location**: `src/memxlnet/training/trainer.py`
 
 Calculate F1 score between prediction and ground truth.
 
@@ -1001,7 +1144,7 @@ print(f"F1 Score: {score:.3f}")  # 1.0 (after normalization)
 
 ### exact_match_score
 
-**Location**: `src/train.py`
+**Location**: `src/memxlnet/training/trainer.py`
 
 Calculate exact match score between prediction and ground truth.
 
@@ -1031,7 +1174,7 @@ print(f"EM Score: {score}")  # 1.0 (after normalization)
 
 ### metric_max_over_ground_truths
 
-**Location**: `src/train.py`
+**Location**: `src/memxlnet/training/trainer.py`
 
 Calculate maximum metric over all ground truths.
 
@@ -1064,7 +1207,7 @@ print(f"Max F1: {max_f1:.3f}")
 
 ### XLNetRecurrentTrainer
 
-**Location**: `src/train.py`
+**Location**: `src/memxlnet/training/trainer.py`
 
 Main trainer class for MemXLNet-QA with memory-aware training.
 
@@ -1134,7 +1277,7 @@ print(f"F1: {metrics['f1']:.3f}")
 
 ### evaluate_squad_v2
 
-**Location**: `src/train.py`
+**Location**: `src/memxlnet/training/trainer.py`
 
 Evaluate SQuAD v2 predictions with official metrics.
 
@@ -1186,7 +1329,7 @@ print(f"NoAns F1: {metrics['NoAns_f1']:.2f}%")
 
 ### main (evaluation entry point)
 
-**Location**: `src/evaluate.py`
+**Location**: `src/memxlnet/evaluation/evaluator.py`
 
 Evaluate a trained model using the saved training configuration.
 

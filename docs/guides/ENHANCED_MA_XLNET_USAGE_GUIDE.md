@@ -35,8 +35,8 @@ pip install pytest
 ### Basic Setup
 
 ```python
-from src.train import TrainingConfig
-from src.memxlnet_qa import MemXLNetForQA
+from memxlnet.training import TrainingConfig
+from memxlnet.models import MemXLNetForQA
 from transformers import XLNetForQuestionAnsweringSimple, XLNetTokenizerFast
 
 # Load base model and tokenizer
@@ -71,7 +71,7 @@ model = MemXLNetForQA(
 ### TrainingConfig Integration
 
 ```python
-from src.train import TrainingConfig
+from memxlnet.training import TrainingConfig
 
 # Enhanced memory configuration
 config = TrainingConfig(
@@ -242,7 +242,7 @@ model_dynamic = MemXLNetForQA(
 ### 1. Reasoning Chain Tracking
 
 ```python
-from src.multihop_utils import HopTracker
+from memxlnet.utils.multihop_utils import HopTracker
 
 # Initialize hop tracker
 tracker = HopTracker(track_attention=True, track_content=True)
@@ -302,7 +302,7 @@ if bridge_scores is not None:
 ### 1. Memory State Visualization
 
 ```python
-from src.multihop_utils import MemoryVisualizer
+from memxlnet.utils.multihop_utils import MemoryVisualizer
 
 # Create visualizer
 visualizer = MemoryVisualizer()
@@ -347,7 +347,7 @@ if 'memory_info' in outputs:
 ### 1. Basic Training Setup
 
 ```python
-from src.train import XLNetRecurrentTrainer
+from memxlnet.training import XLNetRecurrentTrainer
 
 # Create enhanced configuration
 config = TrainingConfig(
@@ -635,7 +635,7 @@ model = MemXLNetForQA(
 # pip install matplotlib seaborn
 
 # Check if available
-from src.multihop_utils import VISUALIZATION_AVAILABLE
+from memxlnet.utils.multihop_utils import VISUALIZATION_AVAILABLE
 if not VISUALIZATION_AVAILABLE:
     print("Install visualization dependencies: pip install matplotlib seaborn")
 ```
@@ -690,4 +690,4 @@ model = MemXLNetForQA.from_pretrained(
 
 The enhanced MA-XLNet provides powerful new capabilities for multi-hop question answering while maintaining full backward compatibility. Start with basic configurations and gradually explore advanced features as needed for your specific use case.
 
-For more examples and advanced usage patterns, see the `examples/multihop_ma_xlnet.py` script and the comprehensive test suite in `tests/test_enhanced_memory.py`.
+For more examples and advanced usage patterns, see the `examples/multihop_ma_xlnet.py` script and the comprehensive test suite in `tests/unit/test_memory.py`.
