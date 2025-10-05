@@ -633,16 +633,16 @@ class XLNetRecurrentTrainer:
                         self.memory_bank[ex_id] = new_memory_state[i].detach()
 
                 # Append logits/labels to per-doc buffers for active docs
+                # NOTE: Keep gradients attached - needed for loss.backward()
                 for i, active in enumerate(document_mask.tolist()):
                     ex_id_raw = batch["example_ids"][i]
                     ex_id = str(ex_id_raw)  # Ensure string key for dict
                     if not active:
                         continue
-                    # Detach to avoid accumulating computation graphs (memory leak fix)
-                    per_doc_logits_start[ex_id].append(start_logits[i].detach())
-                    per_doc_logits_end[ex_id].append(end_logits[i].detach())
-                    per_doc_labels_start[ex_id].append(start_positions[i].detach())
-                    per_doc_labels_end[ex_id].append(end_positions[i].detach())
+                    per_doc_logits_start[ex_id].append(start_logits[i])
+                    per_doc_logits_end[ex_id].append(end_logits[i])
+                    per_doc_labels_start[ex_id].append(start_positions[i])
+                    per_doc_labels_end[ex_id].append(end_positions[i])
 
             # Compute loss per document; use document-level global concat if enabled
             loss_fct = nn.CrossEntropyLoss()
@@ -730,11 +730,11 @@ class XLNetRecurrentTrainer:
             end_logits = outputs.end_logits
             active = document_mask.bool()
             if active.any():
-                # Detach to avoid accumulating computation graphs (memory leak fix)
-                all_start_logits.append(start_logits[active].detach())
-                all_end_logits.append(end_logits[active].detach())
-                all_start_labels.append(start_positions[active].detach())
-                all_end_labels.append(end_positions[active].detach())
+                # NOTE: Keep gradients attached - needed for loss.backward()
+                all_start_logits.append(start_logits[active])
+                all_end_logits.append(end_logits[active])
+                all_start_labels.append(start_positions[active])
+                all_end_labels.append(end_positions[active])
 
         if all_start_logits:
             combined_start_logits = torch.cat(all_start_logits, dim=0)
@@ -1731,6 +1731,10 @@ class XLNetRecurrentTrainer:
                     self.optimizer.step()
                     self.scheduler.step()
                     self.optimizer.zero_grad()
+
+                    # Clear CUDA cache to prevent memory fragmentation
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
 
                     self.global_step += 1
 
