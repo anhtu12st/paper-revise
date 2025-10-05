@@ -361,7 +361,7 @@ class XLNetRecurrentTrainer:
         self._use_any_positive_epoch = self.config.use_any_positive_logic
 
     def _resolve_model_source(self, model_name: str) -> str:
-        """Resolve model source, preferring Hub if configured and local doesn't exist.
+        """Resolve model source, preferring Hub if configured and exists.
 
         Args:
             model_name: Original model name/path from config
@@ -375,14 +375,25 @@ class XLNetRecurrentTrainer:
             is_local_path = os.path.exists(model_name) or os.path.isabs(model_name)
 
             if not is_local_path:
-                # Try loading from Hub first
+                # Check if Hub model actually exists
                 try:
+                    from huggingface_hub import repo_exists
+
                     logger.info(f"🔍 Checking HuggingFace Hub for model: {self.config.hub_model_id}")
-                    # Just check if it's accessible (will actually load in from_pretrained)
-                    return self.config.hub_model_id
+
+                    # Check if repository exists on Hub
+                    if repo_exists(self.config.hub_model_id, repo_type="model", token=self.config.hub_token):
+                        logger.info(f"✅ Found existing model on Hub: {self.config.hub_model_id}")
+                        logger.info(f"📥 Will resume training from checkpoint")
+                        return self.config.hub_model_id
+                    else:
+                        logger.info(f"⚠️  Model not found on Hub: {self.config.hub_model_id}")
+                        logger.info(f"📁 Using base model: {model_name}")
+                        logger.info(f"🆕 Will train from scratch and push to Hub when ready")
+
                 except Exception as e:
-                    logger.warning(f"⚠️ Could not access Hub model {self.config.hub_model_id}: {e}")
-                    logger.info(f"📁 Falling back to: {model_name}")
+                    logger.warning(f"⚠️  Could not check Hub model {self.config.hub_model_id}: {e}")
+                    logger.info(f"📁 Falling back to base model: {model_name}")
 
         return model_name
 
