@@ -638,10 +638,11 @@ class XLNetRecurrentTrainer:
                     ex_id = str(ex_id_raw)  # Ensure string key for dict
                     if not active:
                         continue
-                    per_doc_logits_start[ex_id].append(start_logits[i])
-                    per_doc_logits_end[ex_id].append(end_logits[i])
-                    per_doc_labels_start[ex_id].append(start_positions[i])
-                    per_doc_labels_end[ex_id].append(end_positions[i])
+                    # Detach to avoid accumulating computation graphs (memory leak fix)
+                    per_doc_logits_start[ex_id].append(start_logits[i].detach())
+                    per_doc_logits_end[ex_id].append(end_logits[i].detach())
+                    per_doc_labels_start[ex_id].append(start_positions[i].detach())
+                    per_doc_labels_end[ex_id].append(end_positions[i].detach())
 
             # Compute loss per document; use document-level global concat if enabled
             loss_fct = nn.CrossEntropyLoss()
@@ -729,10 +730,11 @@ class XLNetRecurrentTrainer:
             end_logits = outputs.end_logits
             active = document_mask.bool()
             if active.any():
-                all_start_logits.append(start_logits[active])
-                all_end_logits.append(end_logits[active])
-                all_start_labels.append(start_positions[active])
-                all_end_labels.append(end_positions[active])
+                # Detach to avoid accumulating computation graphs (memory leak fix)
+                all_start_logits.append(start_logits[active].detach())
+                all_end_logits.append(end_logits[active].detach())
+                all_start_labels.append(start_positions[active].detach())
+                all_end_labels.append(end_positions[active].detach())
 
         if all_start_logits:
             combined_start_logits = torch.cat(all_start_logits, dim=0)
@@ -1404,8 +1406,9 @@ class XLNetRecurrentTrainer:
             if hasattr(outputs, "start_logits") and hasattr(outputs, "end_logits"):
                 batch_size = outputs.start_logits.size(0)
                 for i in range(batch_size):
-                    doc_start_logits.append(outputs.start_logits[i : i + 1].cpu())
-                    doc_end_logits.append(outputs.end_logits[i : i + 1].cpu())
+                    # Detach before moving to CPU to avoid memory leak
+                    doc_start_logits.append(outputs.start_logits[i : i + 1].detach().cpu())
+                    doc_end_logits.append(outputs.end_logits[i : i + 1].detach().cpu())
 
                 # Get metadata, handling both Tensor and list types
                 ids_raw: Any = chunk.get("example_ids", [])
