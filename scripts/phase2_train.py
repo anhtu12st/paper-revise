@@ -87,7 +87,6 @@ def create_phase2_config():
         memory_update="gated",
         memory_init="learned",
         memory_impl="token",
-        bptt_horizon=6,
         use_global_softmax=True,
 
         # Warmup behavior: train base together; defer global softmax for 1 epoch

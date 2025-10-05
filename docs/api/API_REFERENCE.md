@@ -889,7 +889,6 @@ class TrainingConfig:
     memory_update: str = "gated"
     memory_init: str = "learned"
     memory_impl: str = "token"
-    bptt_horizon: int = 6
 
     # Training parameters
     num_epochs: int = 3
@@ -919,7 +918,6 @@ class TrainingConfig:
 - `memory_update` (str): Update mechanism ("gated", "simple", "none"). Default: "gated"
 - `memory_init` (str): Initialization ("learned", "zeros"). Default: "learned"
 - `memory_impl` (str): Implementation type. Default: "token"
-- `bptt_horizon` (int): Backpropagation through time horizon. Default: 6
 
 #### Progressive Training
 - `progressive_segments` (Optional[List[int]]): List of segment counts for curriculum learning

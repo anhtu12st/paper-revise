@@ -536,7 +536,6 @@ class MemoryConfig:
     memory_impl: str = "token"           # Implementation type
 
     # Training settings
-    bptt_horizon: int = 6                # Backprop through time steps
     warmup_freeze_base_epochs: int = 1   # Freeze base during warmup
 
     # Memory-specific hyperparameters

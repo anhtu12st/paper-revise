@@ -115,7 +115,6 @@ def get_training_config():
         memory_update="gated",
         memory_init="learned",
         memory_impl="token",
-        bptt_horizon=6,
         use_global_softmax=True,
 
         # ===== Warmup Strategy =====

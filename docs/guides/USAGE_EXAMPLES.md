@@ -185,7 +185,6 @@ memory_config = TrainingConfig(
     # Progressive training
     progressive_segments=[1, 2],   # Start with 1 segment, then 2
     max_n_segs=2,                  # Maximum 2 segments per document
-    bptt_horizon=4,                # Backprop through 4 time steps
 
     # Training parameters
     num_epochs=2,
@@ -235,7 +234,6 @@ advanced_config = TrainingConfig(
     # Progressive curriculum learning
     progressive_segments=[1, 2, 4, 6],  # Curriculum: 1→2→4→6 segments
     max_n_segs=6,                       # Up to 6 segments
-    bptt_horizon=8,                     # Longer backprop horizon
 
     # Training parameters
     num_epochs=4,                  # More epochs for complex training
@@ -265,7 +263,6 @@ print("Advanced configuration created:")
 print(f"- Memory tokens: {advanced_config.memory_num_tokens}")
 print(f"- Progressive segments: {advanced_config.progressive_segments}")
 print(f"- Max segments: {advanced_config.max_n_segs}")
-print(f"- BPTT horizon: {advanced_config.bptt_horizon}")
 ```
 
 ## 🎯 Data Processing Examples

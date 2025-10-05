@@ -230,7 +230,6 @@ class TrainingConfig:
     memory_slots: int | None = None  # Number of memory slots (default: max(mem_token_count, 16))
     memory_init: str = "learned"  # or "zeros"
     memory_impl: str = "token"  # or "prefix" (phase-2)
-    bptt_horizon: int = 6  # optional truncated BPTT horizon
     use_global_softmax: bool = True
 
     # Phase-2 warmup controls
