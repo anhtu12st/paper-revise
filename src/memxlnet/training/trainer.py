@@ -441,33 +441,43 @@ class XLNetRecurrentTrainer:
         """Prepare training and evaluation datasets with memory-efficient loading."""
         logger.info("📚 Preparing datasets...")
 
-        # Process and cache training data
-        logger.info(f"Processing training data: {self.config.dataset_name}")
-        train_features = process_and_cache_dataset(
-            dataset_name=self.config.dataset_name,
-            split=self.config.train_split,
-            cache_dir=self.config.cache_dir,
-            max_examples=self.config.max_train_samples,
-            max_seq_length=self.config.max_seq_length,
-            doc_stride=self.config.doc_stride,
-            streaming_chunk_size=self.config.streaming_chunk_size,
-        )
-        logger.info(f"✅ Training data: {train_features} features cached")
+        # Only preprocess locally if NOT using Hub datasets
+        # (create_dataset_from_cache handles Hub → local cache → process pipeline)
+        if not (self.config.use_hub_dataset and self.config.hub_dataset_id):
+            logger.info("⚠️  Hub datasets disabled - will preprocess locally")
 
-        # Process and cache evaluation data
-        logger.info(f"Processing evaluation data: {self.config.dataset_name}")
-        eval_features = process_and_cache_dataset(
-            dataset_name=self.config.dataset_name,
-            split=self.config.eval_split,
-            cache_dir=self.config.cache_dir,
-            max_examples=self.config.max_eval_samples,
-            max_seq_length=self.config.max_seq_length,
-            doc_stride=self.config.doc_stride,
-            streaming_chunk_size=self.config.streaming_chunk_size,
-        )
-        logger.info(f"✅ Evaluation data: {eval_features} features cached")
+            # Process and cache training data
+            logger.info(f"Processing training data: {self.config.dataset_name}")
+            train_features = process_and_cache_dataset(
+                dataset_name=self.config.dataset_name,
+                split=self.config.train_split,
+                cache_dir=self.config.cache_dir,
+                max_examples=self.config.max_train_samples,
+                max_seq_length=self.config.max_seq_length,
+                doc_stride=self.config.doc_stride,
+                streaming_chunk_size=self.config.streaming_chunk_size,
+                tokenizer=self.tokenizer,
+            )
+            logger.info(f"✅ Training data: {train_features} features cached")
 
-        # Create lazy datasets (with Hub support)
+            # Process and cache evaluation data
+            logger.info(f"Processing evaluation data: {self.config.dataset_name}")
+            eval_features = process_and_cache_dataset(
+                dataset_name=self.config.dataset_name,
+                split=self.config.eval_split,
+                cache_dir=self.config.cache_dir,
+                max_examples=self.config.max_eval_samples,
+                max_seq_length=self.config.max_seq_length,
+                doc_stride=self.config.doc_stride,
+                streaming_chunk_size=self.config.streaming_chunk_size,
+                tokenizer=self.tokenizer,
+            )
+            logger.info(f"✅ Evaluation data: {eval_features} features cached")
+        else:
+            logger.info(f"🚀 Hub datasets enabled: {self.config.hub_dataset_id}")
+            logger.info(f"   Skipping local preprocessing - will try loading from Hub first")
+
+        # Create datasets (with Hub support - handles Hub → local cache → process automatically)
         train_dataset = create_dataset_from_cache(
             dataset_name=self.config.dataset_name,
             split=self.config.train_split,
