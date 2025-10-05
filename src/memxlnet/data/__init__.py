@@ -9,7 +9,9 @@ from memxlnet.data.dataset import (
     create_dataloader,
     create_dataset_from_cache,
     create_evaluation_dataloader,
+    load_dataset_from_hub,
     process_and_cache_dataset,
+    upload_processed_dataset_to_hub,
 )
 from memxlnet.data.text_utils import (
     find_answer_span_with_normalization,
@@ -30,6 +32,9 @@ __all__ = [
     "process_and_cache_dataset",
     "configure_memory_tokens",
     "create_evaluation_dataloader",
+    # HuggingFace Hub integration
+    "upload_processed_dataset_to_hub",
+    "load_dataset_from_hub",
     # Text utilities
     "normalize_unicode",
     "validate_answer_positions",

@@ -237,12 +237,17 @@ class TrainingConfig:
     warmup_disable_global_softmax_epochs: int = 1  # disable doc-level softmax initially
     warmup_disable_any_positive_epochs: int = 1  # disable any-positive extraction initially
 
-    # HuggingFace Hub integration
+    # HuggingFace Hub integration - Model uploads
     hub_model_id: str | None = None  # Repository ID on HuggingFace Hub (e.g., "username/model-name")
     push_to_hub_on_save: bool = False  # Automatically push to Hub when saving checkpoints
-    hub_private: bool = False  # Create private repository on Hub
+    hub_private: bool = True  # 🔒 Create PRIVATE repository on Hub (change to False for public)
     hub_token: str | None = None  # HuggingFace token (defaults to HF_TOKEN environment variable)
     hub_strategy: str = "every_save"  # Push strategy: "every_save", "best_only", "end"
+
+    # HuggingFace Hub integration - Preprocessed datasets
+    hub_dataset_id: str | None = None  # Repository ID for preprocessed dataset (e.g., "username/memxlnet-squad-processed")
+    use_hub_dataset: bool = True  # Try loading preprocessed dataset from Hub first (faster, lower RAM)
+    force_reprocess: bool = False  # Force reprocessing even if Hub/cache exists (for debugging)
 
     def __post_init__(self):
         """Post-initialization setup."""
@@ -451,7 +456,7 @@ class XLNetRecurrentTrainer:
         )
         logger.info(f"✅ Evaluation data: {eval_features} features cached")
 
-        # Create lazy datasets
+        # Create lazy datasets (with Hub support)
         train_dataset = create_dataset_from_cache(
             dataset_name=self.config.dataset_name,
             split=self.config.train_split,
@@ -460,6 +465,10 @@ class XLNetRecurrentTrainer:
             max_seq_length=self.config.max_seq_length,
             doc_stride=self.config.doc_stride,
             max_n_segs=self.config.max_n_segs,
+            tokenizer=self.tokenizer,
+            hub_dataset_id=self.config.hub_dataset_id,
+            use_hub_dataset=self.config.use_hub_dataset,
+            hub_token=self.config.hub_token,
         )
 
         eval_dataset = create_dataset_from_cache(
@@ -470,6 +479,10 @@ class XLNetRecurrentTrainer:
             max_seq_length=self.config.max_seq_length,
             doc_stride=self.config.doc_stride,
             max_n_segs=self.config.max_n_segs,
+            tokenizer=self.tokenizer,
+            hub_dataset_id=self.config.hub_dataset_id,
+            use_hub_dataset=self.config.use_hub_dataset,
+            hub_token=self.config.hub_token,
         )
 
         # Create memory collate config only if memory enabled AND wrapper is active

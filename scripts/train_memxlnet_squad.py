@@ -6,21 +6,42 @@ Standalone MemXLNet Training Script for SQuAD v2
 This script trains a Memory-Augmented XLNet model on SQuAD v2 and automatically
 uploads checkpoints to HuggingFace Hub.
 
+FEATURES:
+---------
+✅ Hub Dataset Integration: Downloads preprocessed data from HuggingFace Hub
+   - No expensive preprocessing required (saves time and RAM!)
+   - Fast startup: download in minutes vs preprocessing in 30+ minutes
+   - Low RAM requirement: ~4-6GB instead of 20-30GB
+
+✅ Automatic Model Upload: Pushes best checkpoints to Hub
+
 SETUP:
 ------
 1. Set HF_TOKEN environment variable:
    export HF_TOKEN='your_huggingface_token'
 
-2. Configure hub_model_id below (line 35)
+2. Configure HUB_USERNAME below (line 38)
 
-3. Run:
+3. (Optional) Preprocess and upload dataset first:
+   python scripts/preprocess_and_upload_to_hub.py
+
+   OR use existing preprocessed datasets from Hub
+
+4. Run training:
    python scripts/train_memxlnet_squad.py
 
-The script will:
-- Train MemXLNet with 8 memory tokens on full SQuAD v2
-- Save checkpoints to ./outputs/memxlnet-squad
-- Automatically push best models to HuggingFace Hub
-- Use GPU if available, otherwise CPU
+WHAT THIS DOES:
+---------------
+- Downloads preprocessed SQuAD v2 from Hub (or processes locally if not found)
+- Trains MemXLNet with 8 memory tokens on full SQuAD v2
+- Saves checkpoints to ./outputs/memxlnet-squad
+- Automatically pushes best models to HuggingFace Hub
+- Uses GPU if available, otherwise CPU
+
+REQUIREMENTS:
+-------------
+- 13GB RAM (with Hub datasets) or 20GB+ RAM (without Hub datasets)
+- GPU recommended (16GB+ VRAM)
 """
 
 import logging
@@ -34,8 +55,17 @@ from memxlnet.training import TrainingConfig, XLNetRecurrentTrainer
 # CONFIGURATION - MODIFY THESE VALUES
 # ============================================================================
 
-# Your HuggingFace repository (e.g., "username/memxlnet-squad")
-HUB_MODEL_ID = "anhtu12st/memxlnet-squad"
+# Your HuggingFace username
+HUB_USERNAME = "anhtu12st"
+
+# Model repository for uploading trained models
+HUB_MODEL_ID = f"{HUB_USERNAME}/memxlnet-squad"
+
+# Preprocessed dataset repository (set to None to disable Hub datasets)
+# This should match the repository created by scripts/preprocess_and_upload_to_hub.py
+# Format: "username/memxlnet-squad-mem{N}" where N is memory_num_tokens
+MEMORY_NUM_TOKENS = 16  # Must match preprocessed dataset
+HUB_DATASET_ID = f"{HUB_USERNAME}/memxlnet-squad-mem{MEMORY_NUM_TOKENS}"
 
 # Optional: Set HF token here if not using environment variable
 # HF_TOKEN = "hf_..."  # Uncomment and set if needed
@@ -111,7 +141,7 @@ def get_training_config():
         fp16=has_cuda,
 
         # ===== Memory-Augmented XLNet Settings =====
-        memory_num_tokens=8,
+        memory_num_tokens=MEMORY_NUM_TOKENS,
         memory_update="gated",
         memory_init="learned",
         memory_impl="token",
@@ -122,12 +152,17 @@ def get_training_config():
         warmup_disable_global_softmax_epochs=1,
         warmup_disable_any_positive_epochs=0,
 
-        # ===== HuggingFace Hub Integration =====
+        # ===== HuggingFace Hub Integration - Model =====
         hub_model_id=HUB_MODEL_ID,
         push_to_hub_on_save=True,
-        hub_private=False,
+        hub_private=True,  # 🔒 Private repository (change to False for public)
         hub_token=hf_token,
         hub_strategy="best_only",
+
+        # ===== HuggingFace Hub Integration - Preprocessed Dataset =====
+        hub_dataset_id=HUB_DATASET_ID,
+        use_hub_dataset=True,  # Download preprocessed data from Hub (fast, low RAM)
+        force_reprocess=False,  # Set True to force local preprocessing
     )
 
     return config
@@ -144,6 +179,11 @@ def print_training_summary(config):
     print(f"   • Dataset: {config.dataset_name}")
     print(f"   • Train split: {config.train_split} (full dataset)")
     print(f"   • Eval split: {config.eval_split} (full dataset)")
+    if config.hub_dataset_id and config.use_hub_dataset:
+        print(f"   • Preprocessed dataset: {config.hub_dataset_id} (from Hub)")
+        print("   • 🚀 Fast mode: Downloads preprocessed data (low RAM)")
+    else:
+        print("   • ⚠️  Will preprocess locally (requires 20GB+ RAM)")
     print()
 
     print("🧠 MODEL:")
@@ -173,7 +213,8 @@ def print_training_summary(config):
     if config.push_to_hub_on_save and config.hub_model_id:
         print(f"   • Repository: {config.hub_model_id}")
         print(f"   • Strategy: {config.hub_strategy} (only best models)")
-        print(f"   • Private: {config.hub_private}")
+        privacy_status = "🔒 PRIVATE" if config.hub_private else "🌐 PUBLIC"
+        print(f"   • Visibility: {privacy_status}")
         token_status = "✓ Set" if config.hub_token else "✗ Not set (using HF_TOKEN env)"
         print(f"   • Token: {token_status}")
     else:

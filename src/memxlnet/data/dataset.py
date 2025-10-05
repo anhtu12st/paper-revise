@@ -600,12 +600,15 @@ def create_dataset_from_cache(
     doc_stride: int,
     max_n_segs: int | None,
     tokenizer: PreTrainedTokenizerBase | None = None,
+    hub_dataset_id: str | None = None,
+    use_hub_dataset: bool = True,
+    hub_token: str | None = None,
 ):
-    """Create (or load) a SquadLikeQADataset using an auto cache-first strategy.
+    """Create (or load) a SquadLikeQADataset using Hub-first, then cache-first strategy.
 
-    Simplified behavior (no extra flags):
-      1. Derive a cache key that is memory-token aware (adds suffix if tokenizer extended)
-      2. If cached chunk files exist => load all, reconstruct lightweight dataset (no re-tokenization)
+    Loading priority:
+      1. If hub_dataset_id provided and use_hub_dataset=True => try downloading from Hub first
+      2. If cached chunk files exist => load from local cache
       3. Else process + cache via `process_and_cache_dataset`, then load
       4. If anything fails, fall back to on-the-fly processing (slow path) with a warning
 
@@ -618,9 +621,12 @@ def create_dataset_from_cache(
         doc_stride: Overlap size used during processing
         max_n_segs: Optional cap on segments per document (used only when building)
         tokenizer: Tokenizer (memory-token aware). Loads default XLNet if None.
+        hub_dataset_id: Optional Hub repository ID for preprocessed dataset
+        use_hub_dataset: Whether to try loading from Hub first (default: True)
+        hub_token: HuggingFace token for Hub access
 
     Returns:
-        SquadLikeQADataset (either reconstructed from cache or freshly processed)
+        SquadLikeQADataset (from Hub, cache, or freshly processed)
     """
     from pathlib import Path
 
@@ -629,6 +635,20 @@ def create_dataset_from_cache(
         from transformers import XLNetTokenizerFast
 
         tokenizer = XLNetTokenizerFast.from_pretrained("xlnet-base-cased")
+
+    # 0. Try loading from HuggingFace Hub first (if configured)
+    if hub_dataset_id and use_hub_dataset:
+        print(f"[create_dataset_from_cache] Hub dataset configured: {hub_dataset_id}")
+        hub_dataset = load_dataset_from_hub(
+            hub_dataset_id=hub_dataset_id,
+            split=split,
+            hub_token=hub_token,
+        )
+        if hub_dataset is not None:
+            print("[create_dataset_from_cache] ✅ Successfully loaded from Hub!")
+            return hub_dataset
+        else:
+            print("[create_dataset_from_cache] Hub dataset not found, falling back to local processing...")
 
     cache_path = Path(cache_dir)
     cache_path.mkdir(parents=True, exist_ok=True)
@@ -642,7 +662,7 @@ def create_dataset_from_cache(
     cache_key = f"{dataset_name}{cache_suffix}"
 
     cache_manager = ChunkedCacheManager(str(cache_path))
-    print(f"[create_dataset_from_cache] Checking cache for '{cache_key}' ({split}) in {cache_path} ...")
+    print(f"[create_dataset_from_cache] Checking local cache for '{cache_key}' ({split}) in {cache_path} ...")
 
     def _load_all_chunks() -> SquadLikeQADataset | None:
         if not cache_manager.cache_exists(cache_key, split):
@@ -659,11 +679,11 @@ def create_dataset_from_cache(
             return None
         ds = _reconstruct_squad_dataset_from_features(features)
         print(
-            f"[create_dataset_from_cache] Reconstructed dataset with {len(ds.features)} features across {len(ds.document_map)} documents (cache)."
+            f"[create_dataset_from_cache] Reconstructed dataset with {len(ds.features)} features across {len(ds.document_map)} documents (local cache)."
         )
         return ds
 
-    # 1. Try loading existing cache
+    # 1. Try loading existing local cache
     ds = _load_all_chunks()
     if ds is not None:
         return ds
@@ -1131,6 +1151,233 @@ def create_evaluation_dataloader(
     return eval_dataset, eval_dataloader
 
 
+def upload_processed_dataset_to_hub(
+    dataset_name: str,
+    split: str,
+    hub_dataset_id: str,
+    tokenizer: PreTrainedTokenizerBase,
+    max_seq_length: int = 384,
+    doc_stride: int = 64,
+    max_examples: int | None = None,
+    max_n_segs: int | None = None,
+    cache_dir: str = "./.cache",
+    hub_token: str | None = None,
+    private: bool = False,
+) -> str:
+    """Process SQuAD-like dataset and upload preprocessed features to HuggingFace Hub.
+
+    This function processes a raw dataset (e.g., SQuAD v2) into segments with
+    memory tokens, then uploads the preprocessed features to HuggingFace Hub
+    for fast downloading during training. This avoids expensive reprocessing.
+
+    Args:
+        dataset_name: Source dataset name (e.g., "squad_v2")
+        split: Dataset split (e.g., "train", "validation")
+        hub_dataset_id: Target Hub repository (e.g., "username/memxlnet-squad-processed")
+        tokenizer: Tokenizer with memory tokens configured
+        max_seq_length: Maximum sequence length
+        doc_stride: Document stride for overlapping segments
+        max_examples: Maximum examples to process (None for all)
+        max_n_segs: Maximum segments per document
+        cache_dir: Temporary cache directory for processing
+        hub_token: HuggingFace token (defaults to HF_TOKEN env var)
+        private: Create private repository on Hub
+
+    Returns:
+        Hub dataset URL
+
+    Example:
+        >>> from transformers import XLNetTokenizerFast
+        >>> from memxlnet.data import configure_memory_tokens, upload_processed_dataset_to_hub
+        >>>
+        >>> # Setup tokenizer with memory tokens
+        >>> tokenizer = XLNetTokenizerFast.from_pretrained("xlnet-base-cased")
+        >>> configure_memory_tokens(tokenizer, memory_num_tokens=8)
+        >>>
+        >>> # Process and upload
+        >>> url = upload_processed_dataset_to_hub(
+        ...     dataset_name="squad_v2",
+        ...     split="train",
+        ...     hub_dataset_id="username/memxlnet-squad-train-mem8",
+        ...     tokenizer=tokenizer,
+        ...     max_seq_length=384,
+        ...     doc_stride=64,
+        ... )
+        >>> print(f"Uploaded to: {url}")
+    """
+    from datasets import Dataset as HFDataset
+
+    print(f"🔄 Processing {dataset_name} {split} for upload to Hub...")
+    print(f"   Target repository: {hub_dataset_id}")
+
+    # Process dataset locally first
+    print("   Step 1/3: Processing raw dataset...")
+    dataset = SquadLikeQADataset(
+        split=split,
+        tokenizer=tokenizer,
+        max_seq_length=max_seq_length,
+        doc_stride=doc_stride,
+        max_examples=max_examples,
+        dataset_name=dataset_name,
+        max_n_segs=max_n_segs,
+    )
+
+    # Convert to HuggingFace Dataset format
+    print(f"   Step 2/3: Converting {len(dataset)} features to HuggingFace format...")
+    features_list = []
+    for i in range(len(dataset)):
+        feature = dataset[i]
+        # Convert tensors to lists for serialization
+        serializable_feature = {}
+        for key, value in feature.items():
+            if isinstance(value, torch.Tensor):
+                serializable_feature[key] = value.tolist()
+            else:
+                serializable_feature[key] = value
+        features_list.append(serializable_feature)
+
+    # Create HuggingFace Dataset
+    hf_dataset = HFDataset.from_list(features_list)
+
+    # Add metadata about preprocessing configuration
+    dataset_card = f"""# Preprocessed {dataset_name.upper()} Dataset for MemXLNet
+
+This dataset contains preprocessed features from {dataset_name} ({split} split) for MemXLNet training.
+
+## Preprocessing Configuration
+
+- **Source dataset**: {dataset_name}
+- **Split**: {split}
+- **Max sequence length**: {max_seq_length}
+- **Document stride**: {doc_stride}
+- **Max segments**: {max_n_segs if max_n_segs else 'unlimited'}
+- **Memory tokens**: {len(tokenizer) - 32000 if len(tokenizer) > 32000 else 0}
+- **Total features**: {len(features_list)}
+- **Total documents**: {len(dataset.document_map)}
+
+## Usage
+
+```python
+from datasets import load_dataset
+from memxlnet.data import create_dataset_from_cache
+
+# Download preprocessed dataset
+dataset = load_dataset("{hub_dataset_id}", split="{split}")
+
+# Or use with MemXLNet training
+from memxlnet.training import TrainingConfig, XLNetRecurrentTrainer
+
+config = TrainingConfig(
+    hub_dataset_id="{hub_dataset_id}",
+    use_hub_dataset=True,
+)
+trainer = XLNetRecurrentTrainer(config)
+trainer.train()
+```
+
+## Benefits
+
+- **No preprocessing required**: Dataset is ready to use
+- **Lower RAM requirements**: Skip expensive tokenization step
+- **Faster training startup**: Download preprocessed data in minutes
+- **Consistent features**: All users get identical preprocessing
+
+Generated with MemXLNet preprocessing pipeline.
+"""
+
+    # Upload to Hub
+    print(f"   Step 3/3: Uploading to HuggingFace Hub ({hub_dataset_id})...")
+    hf_dataset.push_to_hub(
+        hub_dataset_id,
+        split=split,
+        token=hub_token,
+        private=private,
+    )
+
+    # Upload README separately
+    try:
+        from huggingface_hub import HfApi
+
+        api = HfApi(token=hub_token)
+        api.upload_file(
+            path_or_fileobj=dataset_card.encode(),
+            path_in_repo="README.md",
+            repo_id=hub_dataset_id,
+            repo_type="dataset",
+        )
+    except Exception as e:
+        print(f"   Warning: Could not upload README: {e}")
+
+    hub_url = f"https://huggingface.co/datasets/{hub_dataset_id}"
+    print(f"✅ Successfully uploaded to: {hub_url}")
+    return hub_url
+
+
+def load_dataset_from_hub(
+    hub_dataset_id: str,
+    split: str,
+    hub_token: str | None = None,
+) -> SquadLikeQADataset | None:
+    """Load preprocessed dataset from HuggingFace Hub.
+
+    Args:
+        hub_dataset_id: Hub repository ID (e.g., "username/memxlnet-squad-processed")
+        split: Dataset split to load (e.g., "train", "validation")
+        hub_token: HuggingFace token (defaults to HF_TOKEN env var)
+
+    Returns:
+        SquadLikeQADataset if found on Hub, None if not found
+
+    Example:
+        >>> from memxlnet.data import load_dataset_from_hub
+        >>>
+        >>> dataset = load_dataset_from_hub(
+        ...     hub_dataset_id="username/memxlnet-squad-train-mem8",
+        ...     split="train",
+        ... )
+        >>> if dataset:
+        ...     print(f"Loaded {len(dataset)} features from Hub")
+    """
+    try:
+        from datasets import load_dataset as hf_load_dataset
+
+        print(f"📥 Downloading preprocessed dataset from Hub: {hub_dataset_id}")
+        print(f"   Split: {split}")
+
+        # Download from Hub
+        hf_dataset = hf_load_dataset(
+            hub_dataset_id,
+            split=split,
+            token=hub_token,
+        )
+
+        print(f"✅ Downloaded {len(hf_dataset)} features from Hub")
+
+        # Convert back to feature format
+        features = []
+        for item in hf_dataset:
+            feature = {}
+            for key, value in item.items():
+                # Convert lists back to tensors where appropriate
+                if key in ["input_ids", "attention_mask", "token_type_ids", "start_positions", "end_positions"]:
+                    feature[key] = torch.tensor(value)
+                else:
+                    feature[key] = value
+            features.append(feature)
+
+        # Reconstruct SquadLikeQADataset
+        dataset = _reconstruct_squad_dataset_from_features(features)
+        print(f"✅ Reconstructed dataset: {len(dataset.features)} features, {len(dataset.document_map)} documents")
+
+        return dataset
+
+    except Exception as e:
+        print(f"⚠️  Could not load dataset from Hub: {e}")
+        print(f"   Hub dataset '{hub_dataset_id}' not found or inaccessible")
+        print(f"   Falling back to local processing...")
+        return None
+
+
 __all__ = [
     # Core data structures
     "MemoryCollateConfig",
@@ -1144,4 +1391,7 @@ __all__ = [
     "create_dataset_from_cache",
     "create_dataloader",
     "create_evaluation_dataloader",
+    # HuggingFace Hub integration
+    "upload_processed_dataset_to_hub",
+    "load_dataset_from_hub",
 ]
