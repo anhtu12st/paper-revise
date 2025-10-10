@@ -413,6 +413,9 @@ class ChunkedCacheManager:
     to avoid memory issues with large datasets. Each chunk contains a subset
     of processed features that can be loaded independently.
 
+    Now supports incremental caching for streaming processing to avoid
+    memory accumulation during large dataset processing.
+
     Attributes:
         cache_dir: Directory where cache files are stored
         chunk_size: Number of features per cache chunk
@@ -428,6 +431,7 @@ class ChunkedCacheManager:
         self.cache_dir = cache_dir
         self.chunk_size = chunk_size
         os.makedirs(cache_dir, exist_ok=True)
+        self._cache_state: dict[str, Any] | None = None  # For incremental caching
 
     def get_cache_path(self, dataset_name: str, split: str, chunk_id: int) -> str:
         """Get the cache file path for a specific chunk.
@@ -499,6 +503,106 @@ class ChunkedCacheManager:
             chunk_id += 1
         return chunk_id
 
+    def _initialize_incremental_cache(self, dataset_name: str, split: str, **kwargs):
+        """Initialize incremental cache saving for streaming processing.
+
+        This method sets up the state needed for incremental saving during
+        streaming processing, allowing features to be saved as they are
+        processed rather than all at once.
+
+        Args:
+            dataset_name: Name of the dataset
+            split: Dataset split name
+            **kwargs: Additional cache parameters
+        """
+        # Create cache key from parameters
+        cache_key = dataset_name
+        if kwargs.get("has_memory_tokens"):
+            mem_tokens = kwargs.get("memory_num_tokens", 0)
+            if not mem_tokens and kwargs.get("has_memory_tokens"):
+                # Estimate from tokenizer size
+                cache_key += "_mem"
+
+        # Add versioning
+        cache_key += "_v1"  # Match FEATURE_SCHEMA_VERSION
+
+        self._cache_state = {
+            "dataset_name": cache_key,
+            "split": split,
+            "current_chunk_id": 0,
+            "temp_features": [],
+            "total_features": 0,
+            "kwargs": kwargs,
+        }
+
+    def _save_features_chunk(self, features: list[dict[str, Any]], dataset_name: str, split: str, **kwargs):
+        """Save features incrementally during streaming processing.
+
+        This method accumulates features and saves them in chunks to avoid
+        memory accumulation during processing.
+
+        Args:
+            features: List of feature dictionaries to save
+            dataset_name: Name of the dataset
+            split: Dataset split name
+            **kwargs: Additional cache parameters
+        """
+        if self._cache_state is None:
+            self._initialize_incremental_cache(dataset_name, split, **kwargs)
+
+        # Type narrowing for mypy - _cache_state is guaranteed to be non-None after initialization
+        assert self._cache_state is not None
+
+        # Add features to temporary buffer
+        self._cache_state["temp_features"].extend(features)
+
+        # Save complete chunks
+        while len(self._cache_state["temp_features"]) >= self.chunk_size:
+            chunk_features = self._cache_state["temp_features"][: self.chunk_size]
+            self._cache_state["temp_features"] = self._cache_state["temp_features"][self.chunk_size :]
+
+            # Save chunk to disk
+            chunk_id = self._cache_state["current_chunk_id"]
+            self.save_chunk(chunk_features, self._cache_state["dataset_name"], self._cache_state["split"], chunk_id)
+
+            self._cache_state["current_chunk_id"] += 1
+            self._cache_state["total_features"] += len(chunk_features)
+
+    def _finalize_incremental_cache(self, dataset_name: str, split: str, **kwargs):
+        """Finalize incremental cache saving.
+
+        This method saves any remaining features and cleans up the cache state.
+
+        Args:
+            dataset_name: Name of the dataset
+            split: Dataset split name
+            **kwargs: Additional cache parameters
+        """
+        if self._cache_state is None:
+            return
+
+        # Type narrowing for mypy - _cache_state is guaranteed to be non-None here
+        assert self._cache_state is not None
+
+        # Save any remaining features
+        if self._cache_state["temp_features"]:
+            chunk_id = self._cache_state["current_chunk_id"]
+            self.save_chunk(
+                self._cache_state["temp_features"],
+                self._cache_state["dataset_name"],
+                self._cache_state["split"],
+                chunk_id,
+            )
+            self._cache_state["total_features"] += len(self._cache_state["temp_features"])
+
+        total_features = self._cache_state["total_features"]
+        total_chunks = self._cache_state["current_chunk_id"] + (1 if self._cache_state["temp_features"] else 0)
+
+        # Clear cache state
+        self._cache_state = None
+
+        print(f"✅ Finalized incremental cache: {total_chunks} chunks, {total_features} features")
+
 
 def process_and_cache_dataset(
     dataset_name: str,
@@ -510,13 +614,15 @@ def process_and_cache_dataset(
     streaming_chunk_size: int,
     tokenizer: PreTrainedTokenizerBase | None = None,
     max_n_segs: int | None = None,
+    use_streaming: bool = True,
+    max_memory_gb: float = 8.0,
 ) -> int:
     """Process and cache dataset features for memory-efficient loading.
 
     This function handles the complete preprocessing pipeline:
-    1. Load raw dataset from HuggingFace
+    1. Load raw dataset from HuggingFace (streaming or regular)
     2. Process into segments with answer span mapping
-    3. Cache processed features for fast reloading
+    3. Cache processed features incrementally for memory efficiency
     4. Handle memory tokens if present in tokenizer
 
     Args:
@@ -530,6 +636,9 @@ def process_and_cache_dataset(
         tokenizer: Tokenizer to use. If None, loads default xlnet-base-cased.
                   Pass checkpoint tokenizer to use memory tokens properly.
         max_n_segs: Maximum segments per document.
+        use_streaming: Whether to use streaming processing for memory efficiency.
+                      Automatically enabled for large datasets (>1000 examples).
+        max_memory_gb: Maximum memory usage in GB (for streaming mode).
 
     Returns:
         Number of processed features
@@ -538,6 +647,8 @@ def process_and_cache_dataset(
         The function automatically detects memory-enabled tokenizers
         (those with >32000 tokens) and includes this in the cache key
         to avoid conflicts between standard and memory-enabled processing.
+
+        Streaming mode is recommended for large datasets to avoid OOM errors.
     """
     os.makedirs(cache_dir, exist_ok=True)
 
@@ -571,22 +682,61 @@ def process_and_cache_dataset(
 
             tokenizer = XLNetTokenizerFast.from_pretrained("xlnet-base-cased")
 
-        dataset = SquadLikeQADataset(
-            split=split,
-            tokenizer=tokenizer,
-            max_seq_length=max_seq_length,
-            doc_stride=doc_stride,
-            max_examples=max_examples,
-            dataset_name=dataset_name,
-            max_n_segs=max_n_segs,
-        )
+        # Decide whether to use streaming
+        # Force streaming for large datasets or when explicitly requested
+        force_streaming = max_examples is None or max_examples > 1000
+        should_use_streaming = use_streaming or force_streaming
 
-        # Save as single chunk for simplicity
-        features = [dataset[i] for i in range(len(dataset))]
-        cache_manager.save_chunk(features, modified_dataset_name, split, 0)
+        if should_use_streaming:
+            # Use memory-efficient streaming processing
+            from memxlnet.data.streaming import StreamingSquadProcessor
 
-        return len(features)
-    except Exception:
+            print(f"🌊 Using streaming mode for {dataset_name} ({split})")
+            print(f"   Max examples: {max_examples if max_examples else 'all'}")
+            print(f"   Streaming chunk size: {streaming_chunk_size}")
+            print(f"   Max memory: {max_memory_gb} GB")
+
+            processor = StreamingSquadProcessor(
+                tokenizer=tokenizer,
+                max_seq_length=max_seq_length,
+                doc_stride=doc_stride,
+                streaming_chunk_size=streaming_chunk_size,
+                max_memory_gb=max_memory_gb,
+            )
+
+            total_features = processor.process_dataset_streaming(
+                dataset_name=dataset_name,
+                split=split,
+                max_examples=max_examples,
+                cache_manager=cache_manager,
+                max_n_segs=max_n_segs,
+            )
+
+            return total_features
+
+        else:
+            # Use traditional in-memory processing for small datasets
+            print(f"📚 Using traditional processing for {dataset_name} ({split})")
+            print(f"   Max examples: {max_examples}")
+
+            dataset = SquadLikeQADataset(
+                split=split,
+                tokenizer=tokenizer,
+                max_seq_length=max_seq_length,
+                doc_stride=doc_stride,
+                max_examples=max_examples,
+                dataset_name=dataset_name,
+                max_n_segs=max_n_segs,
+            )
+
+            # Save as single chunk for simplicity
+            features = [dataset[i] for i in range(len(dataset))]
+            cache_manager.save_chunk(features, modified_dataset_name, split, 0)
+
+            return len(features)
+
+    except Exception as e:
+        print(f"⚠️ Error during processing: {e}")
         # Fallback: return estimated count
         return max_examples if max_examples is not None else 1000
 
@@ -603,6 +753,7 @@ def create_dataset_from_cache(
     hub_dataset_id: str | None = None,
     use_hub_dataset: bool = True,
     hub_token: str | None = None,
+    use_lazy_loading: bool = False,
 ):
     """Create (or load) a SquadLikeQADataset using Hub-first, then cache-first strategy.
 
@@ -624,9 +775,11 @@ def create_dataset_from_cache(
         hub_dataset_id: Optional Hub repository ID for preprocessed dataset
         use_hub_dataset: Whether to try loading from Hub first (default: True)
         hub_token: HuggingFace token for Hub access
+        use_lazy_loading: Whether to use lazy loading (loads features on-demand).
+                         Recommended for large datasets to reduce memory usage.
 
     Returns:
-        SquadLikeQADataset (from Hub, cache, or freshly processed)
+        SquadLikeQADataset or LazySquadLikeQADataset (from Hub, cache, or freshly processed)
     """
     from pathlib import Path
 
@@ -664,24 +817,38 @@ def create_dataset_from_cache(
     cache_manager = ChunkedCacheManager(str(cache_path))
     print(f"[create_dataset_from_cache] Checking local cache for '{cache_key}' ({split}) in {cache_path} ...")
 
-    def _load_all_chunks() -> SquadLikeQADataset | None:
+    def _load_all_chunks() -> SquadLikeQADataset | LazySquadLikeQADataset | None:
         if not cache_manager.cache_exists(cache_key, split):
             return None
-        total_chunks = cache_manager.get_total_chunks(cache_key, split)
-        print(f"[create_dataset_from_cache] Cache hit: {total_chunks} chunk(s) detected. Loading ...")
-        features: list[dict[str, Any]] = []
-        for cid in range(total_chunks):
-            shard = cache_manager.load_chunk(cache_key, split, cid)
-            if shard:
-                features.extend(shard)
-        if not features:
-            print("[create_dataset_from_cache] Warning: chunk files were empty; treating as cache miss.")
-            return None
-        ds = _reconstruct_squad_dataset_from_features(features)
-        print(
-            f"[create_dataset_from_cache] Reconstructed dataset with {len(ds.features)} features across {len(ds.document_map)} documents (local cache)."
-        )
-        return ds
+
+        if use_lazy_loading:
+            # Use lazy loading for memory efficiency
+            print("[create_dataset_from_cache] Using lazy loading mode...")
+            ds = LazySquadLikeQADataset(
+                cache_manager=cache_manager,
+                dataset_name=cache_key,
+                split=split,
+                cache_params={"max_seq_length": max_seq_length, "doc_stride": doc_stride},
+            )
+            return ds
+        else:
+            # Load all features into memory
+            total_chunks = cache_manager.get_total_chunks(cache_key, split)
+            print(f"[create_dataset_from_cache] Cache hit: {total_chunks} chunk(s) detected. Loading ...")
+            features: list[dict[str, Any]] = []
+            for cid in range(total_chunks):
+                shard = cache_manager.load_chunk(cache_key, split, cid)
+                if shard:
+                    features.extend(shard)
+            if not features:
+                print("[create_dataset_from_cache] Warning: chunk files were empty; treating as cache miss.")
+                return None
+            # _reconstruct_squad_dataset_from_features always returns SquadLikeQADataset
+            eager_ds = _reconstruct_squad_dataset_from_features(features)
+            print(
+                f"[create_dataset_from_cache] Reconstructed dataset with {len(eager_ds.features)} features across {len(eager_ds.document_map)} documents (local cache)."
+            )
+            return eager_ds
 
     # 1. Try loading existing local cache
     ds = _load_all_chunks()
@@ -817,6 +984,159 @@ def _memory_aware_collate_fn(batch, memory_collate_config: MemoryCollateConfig |
     return collated
 
 
+class LazySquadLikeQADataset(Dataset):
+    """Memory-efficient lazy-loading dataset for SQuAD-like QA data.
+
+    This dataset loads processed features on-demand from cached chunks,
+    avoiding the need to load all features into memory at once. This
+    enables training on datasets that are larger than available RAM.
+
+    Key Features:
+        - On-demand loading from disk cache
+        - Minimal memory footprint (only metadata in RAM)
+        - Compatible with TimeStepMajorDataLoader
+        - Fast random access via chunk-based indexing
+        - Full compatibility with memory tokens and all MemXLNet features
+
+    Note:
+        This dataset requires that features have already been processed
+        and cached using process_and_cache_dataset().
+    """
+
+    def __init__(
+        self,
+        cache_manager: ChunkedCacheManager,
+        dataset_name: str,
+        split: str,
+        cache_params: dict[str, Any],
+    ):
+        """Initialize lazy-loading dataset from cached features.
+
+        Args:
+            cache_manager: ChunkedCacheManager instance for loading features
+            dataset_name: Name of the dataset (cache key prefix)
+            split: Dataset split name
+            cache_params: Additional cache parameters (for cache key generation)
+        """
+        self.cache_manager = cache_manager
+        self.dataset_name = dataset_name
+        self.split = split
+        self.cache_params = cache_params
+
+        # Build lightweight index: feature_idx -> (chunk_id, position_in_chunk)
+        self._feature_index: list[tuple[int, int]] = []
+        self.document_map: dict[str, list[int]] = {}
+
+        # Load all chunks to build index
+        total_chunks = cache_manager.get_total_chunks(dataset_name, split)
+        feature_idx = 0
+
+        print(f"💤 Building lazy dataset index for {dataset_name} ({split})...")
+
+        for chunk_id in range(total_chunks):
+            chunk_data = cache_manager.load_chunk(dataset_name, split, chunk_id)
+
+            for pos_in_chunk, feature in enumerate(chunk_data):
+                # Record chunk location for this feature
+                self._feature_index.append((chunk_id, pos_in_chunk))
+
+                # Build document map
+                example_id = feature.get("example_id")
+                if example_id:
+                    if example_id not in self.document_map:
+                        self.document_map[example_id] = []
+                    self.document_map[example_id].append(feature_idx)
+
+                feature_idx += 1
+
+        print(f"✅ Lazy dataset ready: {len(self._feature_index)} features, {len(self.document_map)} documents")
+        print(f"   Memory footprint: {len(self._feature_index) * 16 / 1024 / 1024:.1f} MB (index only)")
+
+        # Cache for recently accessed chunks
+        self._chunk_cache: dict[int, list[dict[str, Any]]] = {}
+        self._max_cached_chunks = 3  # Keep last 3 chunks in memory
+
+    def __len__(self) -> int:
+        return len(self._feature_index)
+
+    def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
+        """Load feature on-demand from cache.
+
+        Args:
+            idx: Feature index
+
+        Returns:
+            Feature dictionary with tensors and metadata
+        """
+        chunk_id, pos_in_chunk = self._feature_index[idx]
+
+        # Check if chunk is in cache
+        if chunk_id not in self._chunk_cache:
+            # Load chunk from disk
+            chunk_data = self.cache_manager.load_chunk(self.dataset_name, self.split, chunk_id)
+            self._chunk_cache[chunk_id] = chunk_data
+
+            # Limit cache size
+            if len(self._chunk_cache) > self._max_cached_chunks:
+                # Remove oldest chunk (simple FIFO)
+                oldest_chunk_id = next(iter(self._chunk_cache))
+                del self._chunk_cache[oldest_chunk_id]
+
+        # Get feature from cached chunk
+        feature = self._chunk_cache[chunk_id][pos_in_chunk]
+
+        # Convert to tensor format (same as SquadLikeQADataset.__getitem__)
+        item = {}
+
+        # Convert tensor fields
+        for key in ["input_ids", "attention_mask", "token_type_ids", "start_positions", "end_positions"]:
+            if key in feature:
+                # Feature might already be a tensor (from cache) or a list
+                if isinstance(feature[key], torch.Tensor):
+                    item[key] = feature[key]
+                else:
+                    item[key] = torch.tensor(feature[key])
+
+        # Keep metadata as-is
+        metadata_keys = [
+            "example_id",
+            "segment_index",
+            "total_segments",
+            "offset_mapping",
+            "context",
+            "question",
+            "cls_index",
+            "has_answer",
+            "chosen_answer_text",
+            "chosen_answer_char_span",
+            "boundary_info",
+        ]
+        for key in metadata_keys:
+            if key in feature:
+                item[key] = feature[key]
+
+        return item
+
+    def get_document_segments(self, example_id: str) -> list[int]:
+        """Get all segment indices for a document.
+
+        Args:
+            example_id: Document identifier
+
+        Returns:
+            List of feature indices belonging to this document
+        """
+        return list(self.document_map.get(example_id, []))
+
+    def get_all_documents(self) -> list[str]:
+        """Get all document IDs.
+
+        Returns:
+            List of all document identifiers in the dataset
+        """
+        return list(self.document_map.keys())
+
+
 class TimeStepMajorDataLoader:
     """
     DataLoader that reorganizes regular batches into time-step-major format.
@@ -839,7 +1159,7 @@ class TimeStepMajorDataLoader:
 
     def __init__(
         self,
-        dataset: SquadLikeQADataset,
+        dataset: SquadLikeQADataset | LazySquadLikeQADataset,
         batch_size: int,
         shuffle: bool = False,
         max_segments: int | None = None,
@@ -847,7 +1167,7 @@ class TimeStepMajorDataLoader:
         """Initialize time-step-major dataloader.
 
         Args:
-            dataset: SquadLikeQADataset with document tracking
+            dataset: SquadLikeQADataset or LazySquadLikeQADataset with document tracking
             batch_size: Number of documents to process simultaneously
             shuffle: Whether to shuffle document order
             max_segments: Maximum segments per document (None for all)
@@ -1020,8 +1340,9 @@ def create_dataloader(
           as TimeStepMajorDataLoader has its own internal batching mechanism
     """
 
-    if use_time_step_major and isinstance(dataset, SquadLikeQADataset):
+    if use_time_step_major and isinstance(dataset, (SquadLikeQADataset, LazySquadLikeQADataset)):
         # Return time-step-major dataloader for memory-enabled training
+        # Works with both eager-loaded and lazy-loaded datasets
         return TimeStepMajorDataLoader(
             dataset=dataset,
             batch_size=batch_size,
@@ -1250,7 +1571,7 @@ This dataset contains preprocessed features from {dataset_name} ({split} split) 
 - **Split**: {split}
 - **Max sequence length**: {max_seq_length}
 - **Document stride**: {doc_stride}
-- **Max segments**: {max_n_segs if max_n_segs else 'unlimited'}
+- **Max segments**: {max_n_segs if max_n_segs else "unlimited"}
 - **Memory tokens**: {len(tokenizer) - 32000 if len(tokenizer) > 32000 else 0}
 - **Total features**: {len(features_list)}
 - **Total documents**: {len(dataset.document_map)}
@@ -1374,7 +1695,7 @@ def load_dataset_from_hub(
     except Exception as e:
         print(f"⚠️  Could not load dataset from Hub: {e}")
         print(f"   Hub dataset '{hub_dataset_id}' not found or inaccessible")
-        print(f"   Falling back to local processing...")
+        print("   Falling back to local processing...")
         return None
 
 
@@ -1382,6 +1703,7 @@ __all__ = [
     # Core data structures
     "MemoryCollateConfig",
     "SquadLikeQADataset",
+    "LazySquadLikeQADataset",
     "ChunkedCacheManager",
     "TimeStepMajorDataLoader",
     # Memory token integration

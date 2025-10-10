@@ -221,7 +221,7 @@ class TrainingConfig:
     memory_num_tokens: int = 32  # per read/write set
     memory_update: str = "gated"  # or "none"
 
-    # Enhanced memory settings (MA-XLNet multi-hop)
+    # Enhanced memory settings
     use_differentiable_memory: bool = False  # Enable differentiable memory
     num_memory_heads: int = 1  # Number of read/write heads
     memory_sharpness: float = 1.0  # Attention sharpening factor
@@ -245,7 +245,9 @@ class TrainingConfig:
     hub_strategy: str = "every_save"  # Push strategy: "every_save", "best_only", "end"
 
     # HuggingFace Hub integration - Preprocessed datasets
-    hub_dataset_id: str | None = None  # Repository ID for preprocessed dataset (e.g., "username/memxlnet-squad-processed")
+    hub_dataset_id: str | None = (
+        None  # Repository ID for preprocessed dataset (e.g., "username/memxlnet-squad-processed")
+    )
     use_hub_dataset: bool = True  # Try loading preprocessed dataset from Hub first (faster, lower RAM)
     force_reprocess: bool = False  # Force reprocessing even if Hub/cache exists (for debugging)
 
@@ -384,12 +386,12 @@ class XLNetRecurrentTrainer:
                     # Check if repository exists on Hub
                     if repo_exists(self.config.hub_model_id, repo_type="model", token=self.config.hub_token):
                         logger.info(f"✅ Found existing model on Hub: {self.config.hub_model_id}")
-                        logger.info(f"📥 Will resume training from checkpoint")
+                        logger.info("📥 Will resume training from checkpoint")
                         return self.config.hub_model_id
                     else:
                         logger.info(f"⚠️  Model not found on Hub: {self.config.hub_model_id}")
                         logger.info(f"📁 Using base model: {model_name}")
-                        logger.info(f"🆕 Will train from scratch and push to Hub when ready")
+                        logger.info("🆕 Will train from scratch and push to Hub when ready")
 
                 except Exception as e:
                     logger.warning(f"⚠️  Could not check Hub model {self.config.hub_model_id}: {e}")
@@ -475,7 +477,7 @@ class XLNetRecurrentTrainer:
             logger.info(f"✅ Evaluation data: {eval_features} features cached")
         else:
             logger.info(f"🚀 Hub datasets enabled: {self.config.hub_dataset_id}")
-            logger.info(f"   Skipping local preprocessing - will try loading from Hub first")
+            logger.info("   Skipping local preprocessing - will try loading from Hub first")
 
         # Create datasets (with Hub support - handles Hub → local cache → process automatically)
         train_dataset = create_dataset_from_cache(
@@ -1374,7 +1376,7 @@ class XLNetRecurrentTrainer:
                     ids_cpu = input_ids.cpu().tolist()
 
                     # ✅ Get CLS indices from batch (like test_evaluation.py)
-                    cls_indices_raw = chunk.get("cls_index", [])
+                    cls_indices_raw: Any = chunk.get("cls_index", [])
                     chunk_cls_indices: list[int] = (
                         cls_indices_raw.tolist()
                         if isinstance(cls_indices_raw, torch.Tensor)
@@ -1646,7 +1648,9 @@ class XLNetRecurrentTrainer:
                     # Try loading from Hub with stage tag
                     hub_stage_revision = f"stage-{stage}"
                     model_load_path = self.config.hub_model_id
-                    logger.info(f"🔄 Loading model from Hub: {self.config.hub_model_id} (revision: {hub_stage_revision})")
+                    logger.info(
+                        f"🔄 Loading model from Hub: {self.config.hub_model_id} (revision: {hub_stage_revision})"
+                    )
                     # Note: HuggingFace from_pretrained supports revision parameter, but we'll try without it first
 
                 if model_load_path:
@@ -1679,7 +1683,7 @@ class XLNetRecurrentTrainer:
                         self.model = XLNetForQuestionAnsweringSimple.from_pretrained(model_load_path)
                     self.model.to(self.device)
                 else:
-                    logger.warning(f"⚠️ Previous stage model not found locally or on Hub")
+                    logger.warning("⚠️ Previous stage model not found locally or on Hub")
 
             # Prepare data with new segment limit
             logger.info(f"📚 Preparing data with max {max_segs} segments per document")

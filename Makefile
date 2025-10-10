@@ -4,7 +4,7 @@ install:
 	uv sync
 
 test:
-	pytest tests/ -v --cov=src/memxlnet --cov-report=term-missing
+	uv run pytest tests/ -v --cov=src/memxlnet --cov-report=term-missing
 
 lint:
 	@echo "Running ruff..."

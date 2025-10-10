@@ -1,7 +1,7 @@
-"""Enhanced Memory Modules for Multi-Hop MA-XLNet.
+"""Enhanced Memory Modules for MA-XLNet.
 
 This module implements differentiable memory mechanisms inspired by
-Memory-Augmented Neural Networks (MANNs) for complex multi-hop reasoning.
+Memory-Augmented Neural Networks (MANNs).
 """
 
 import numpy as np

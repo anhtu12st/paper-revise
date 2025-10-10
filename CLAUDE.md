@@ -8,16 +8,20 @@ MemXLNet-QA is a memory-augmented XLNet implementation for long-context question
 
 ## 📚 Documentation Map
 
+> **⚠️ Note:** Some documentation describes planned features. See **[docs/PLANNED_FEATURES.md](docs/PLANNED_FEATURES.md)** for status.
+
 **Essential Reading:**
-- **[API Reference](docs/api/API_REFERENCE.md)** - Complete API documentation
-- **[Usage Guide](docs/guides/ENHANCED_MA_XLNET_USAGE_GUIDE.md)** - Comprehensive usage examples
+- **[API Reference](docs/api/API_REFERENCE.md)** - Complete API documentation ✅ Verified
+- **[Usage Guide](docs/guides/ENHANCED_MA_XLNET_USAGE_GUIDE.md)** - Usage examples (includes planned features)
 - **[Implementation Details](docs/technical/MA_XLNET_IMPLEMENTATION.md)** - Technical architecture
 
 **Specialized Topics:**
-- **[Memory Tokens Guide](docs/guides/MEMORY_TOKENS_GUIDE.md)** - Memory system deep dive
+- **[Memory Tokens Guide](docs/guides/MEMORY_TOKENS_GUIDE.md)** - Memory system deep dive ✅ Verified
+- **[Streaming Guide](docs/guides/STREAMING_GUIDE.md)** - Memory-efficient data processing ✅ New
 - **[Data Processing](docs/technical/DATA_PROCESSING.md)** - Data pipeline details
 - **[Testing Guide](docs/guides/TESTING_VALIDATION_GUIDE.md)** - Testing and validation
 - **[Quick Reference](docs/guides/ENHANCED_MA_XLNET_QUICK_REFERENCE.md)** - Developer cheat sheet
+- **[Planned Features](docs/PLANNED_FEATURES.md)** - Roadmap and feature status 🆕
 
 ## Directory Structure
 
@@ -43,18 +47,16 @@ paper-revise/
 ### Environment Setup
 ```bash
 # Create virtual environment and install
-uv venv
-source .venv/bin/activate  # macOS/Linux
-uv pip install -e .
+uv sync
 ```
 
 ### Basic Training
 ```bash
 # Phase 2 training (recommended)
-python scripts/phase2_train.py
+uv run python scripts/phase2_train.py
 
 # Quick smoke test
-python -c "
+uv run python -c "
 from memxlnet.training import TrainingConfig, XLNetRecurrentTrainer
 config = TrainingConfig(max_train_samples=10, num_epochs=1)
 trainer = XLNetRecurrentTrainer(config)
@@ -65,10 +67,10 @@ print('✅ Trainer initialized')
 ### Basic Evaluation
 ```bash
 # Evaluate trained model
-python scripts/evaluate.py outputs/xlnet-squad-phase2-1/training_config.json
+uv run python scripts/evaluate.py outputs/xlnet-squad-phase2-1/training_config.json
 
 # Run test suite
-pytest tests/
+uv run pytest tests/
 ```
 
 ### HuggingFace Hub Integration
@@ -76,18 +78,18 @@ pytest tests/
 # ONE-TIME: Preprocess and upload dataset to Hub (requires 20GB+ RAM)
 # Edit scripts/preprocess_and_upload_to_hub.py to set your HUB_USERNAME first
 export HF_TOKEN='your_huggingface_token'
-python scripts/preprocess_and_upload_to_hub.py
+uv run python scripts/preprocess_and_upload_to_hub.py
 
 # FAST TRAINING: Use Hub-preprocessed datasets (requires only 4-6GB RAM)
 # Edit scripts/train_memxlnet_squad.py to set your HUB_USERNAME first
-python scripts/train_memxlnet_squad.py
+uv run python scripts/train_memxlnet_squad.py
 # This downloads preprocessed data from Hub and starts training in minutes!
 ```
 
 ### Verify Installation
 ```bash
 # Test all imports
-python -c "
+uv run python -c "
 from memxlnet import __version__
 from memxlnet.models import MemXLNetForQA
 from memxlnet.training import TrainingConfig, XLNetRecurrentTrainer
@@ -296,11 +298,14 @@ jupyter notebook notebooks/upload_to_huggingface.ipynb
 |------|---------------|
 | Train a model | [Usage Guide](docs/guides/ENHANCED_MA_XLNET_USAGE_GUIDE.md) |
 | Configure memory | [Memory Tokens Guide](docs/guides/MEMORY_TOKENS_GUIDE.md) |
+| Stream large datasets | [Streaming Guide](docs/guides/STREAMING_GUIDE.md) |
+| Hub integration | [API Reference](docs/api/API_REFERENCE.md#hub-integration) |
 | Understand architecture | [Implementation Details](docs/technical/MA_XLNET_IMPLEMENTATION.md) |
 | Debug evaluation | [Testing Guide](docs/guides/TESTING_VALIDATION_GUIDE.md) |
 | Process data | [Data Processing](docs/technical/DATA_PROCESSING.md) |
 | API reference | [API Reference](docs/api/API_REFERENCE.md) |
 | Quick examples | [Quick Reference](docs/guides/ENHANCED_MA_XLNET_QUICK_REFERENCE.md) |
+| Check feature status | [Planned Features](docs/PLANNED_FEATURES.md) |
 
 ## Development Workflow
 

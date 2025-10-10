@@ -1,8 +1,25 @@
 # Enhanced MA-XLNet Usage Guide
 
+> **⚠️ IMPORTANT - Feature Availability Notice:**
+>
+> This guide describes both **implemented** and **planned** features for MemXLNet-QA.
+>
+> **✅ Currently Available:**
+> - Token-based memory (sections 1-2)
+> - Basic training and configuration
+> - Progressive training
+>
+> **🚧 Planned Features (Not Yet Implemented):**
+> - Differentiable memory with MemoryController
+> - HopTracker and multi-hop reasoning utilities
+> - MemoryVisualizer and attention visualization
+> - Multi-head attention
+>
+> See [PLANNED_FEATURES.md](../PLANNED_FEATURES.md) for implementation status and roadmap.
+
 ## Overview
 
-This guide covers how to use the enhanced Memory-Augmented XLNet (MA-XLNet) with differentiable memory for multi-hop question answering. The enhanced implementation provides backward-compatible improvements while adding powerful new capabilities for complex reasoning tasks.
+This guide covers how to use the Memory-Augmented XLNet (MA-XLNet) for question answering. It includes documentation for both currently implemented features and planned enhancements for complex reasoning tasks.
 
 ## Table of Contents
 
@@ -32,7 +49,7 @@ pip install matplotlib seaborn
 pip install pytest
 ```
 
-### Basic Setup
+### Basic Setup (✅ Available Now)
 
 ```python
 from memxlnet.training import TrainingConfig
@@ -43,15 +60,29 @@ from transformers import XLNetForQuestionAnsweringSimple, XLNetTokenizerFast
 base_model = XLNetForQuestionAnsweringSimple.from_pretrained('xlnet-base-cased')
 tokenizer = XLNetTokenizerFast.from_pretrained('xlnet-base-cased')
 
-# Create enhanced model with differentiable memory
+# Create model with token-based memory (✅ Available)
 model = MemXLNetForQA(
     base_model=base_model,
     mem_token_count=32,
-    use_differentiable_memory=True,  # Enable enhanced memory
-    num_memory_heads=4,
-    memory_sharpness=2.0,
-    enable_usage_tracking=True,
-    memory_slots=64
+    memory_init="learned",
+    memory_update="gated"
+)
+```
+
+### Enhanced Setup (🚧 Planned - Not Yet Available)
+
+```python
+# This configuration is accepted but differentiable memory is not yet implemented
+# The model will fall back to token-based memory with a warning
+
+model = MemXLNetForQA(
+    base_model=base_model,
+    mem_token_count=32,
+    use_differentiable_memory=True,  # 🚧 Planned - will warn and use token-based
+    num_memory_heads=4,               # 🚧 Planned
+    memory_sharpness=2.0,             # 🚧 Planned
+    enable_usage_tracking=True,       # 🚧 Planned
+    memory_slots=64                   # 🚧 Planned
 )
 ```
 
@@ -237,11 +268,15 @@ model_dynamic = MemXLNetForQA(
 # The model will automatically allocate less-used slots for new information
 ```
 
-## Multi-Hop Reasoning
+## Multi-Hop Reasoning (🚧 Planned - Not Yet Implemented)
 
-### 1. Reasoning Chain Tracking
+> **⚠️ Note:** The utilities described in this section are planned but not yet implemented.
+> The imports will fail with `ModuleNotFoundError`. See [PLANNED_FEATURES.md](../PLANNED_FEATURES.md).
+
+### 1. Reasoning Chain Tracking (🚧 Planned)
 
 ```python
+# 🚧 NOT YET AVAILABLE - This will fail with ImportError
 from memxlnet.utils.multihop_utils import HopTracker
 
 # Initialize hop tracker
@@ -297,11 +332,15 @@ if bridge_scores is not None:
     print(f"Bridge entity scores: {bridge_scores}")
 ```
 
-## Memory Visualization
+## Memory Visualization (🚧 Planned - Not Yet Implemented)
 
-### 1. Memory State Visualization
+> **⚠️ Note:** The visualization utilities described in this section are planned but not yet implemented.
+> The imports will fail with `ModuleNotFoundError`. See [PLANNED_FEATURES.md](../PLANNED_FEATURES.md).
+
+### 1. Memory State Visualization (🚧 Planned)
 
 ```python
+# 🚧 NOT YET AVAILABLE - This will fail with ImportError
 from memxlnet.utils.multihop_utils import MemoryVisualizer
 
 # Create visualizer
@@ -690,4 +729,7 @@ model = MemXLNetForQA.from_pretrained(
 
 The enhanced MA-XLNet provides powerful new capabilities for multi-hop question answering while maintaining full backward compatibility. Start with basic configurations and gradually explore advanced features as needed for your specific use case.
 
-For more examples and advanced usage patterns, see the `examples/multihop_ma_xlnet.py` script and the comprehensive test suite in `tests/unit/test_memory.py`.
+For more examples and usage patterns, see:
+- `examples/validate_answer_spans.py` - Answer span validation examples
+- `tests/unit/test_answer_span_validation.py` - Answer span validation tests
+- `tests/unit/test_multi_segment_answers.py` - Multi-segment answer tests

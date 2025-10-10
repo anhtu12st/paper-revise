@@ -1,20 +1,24 @@
 # Documentation Index
 
-This directory contains comprehensive documentation for the Enhanced Memory-Augmented XLNet (MA-XLNet) implementation.
+This directory contains comprehensive documentation for the Memory-Augmented XLNet (MA-XLNet) implementation.
+
+> **⚠️ Important Note on Feature Status:**
+> Some documentation describes planned or experimental features. Please see **[PLANNED_FEATURES.md](PLANNED_FEATURES.md)** for details on feature availability. Always verify features against the actual codebase before implementation.
 
 ## 📚 Documentation Overview
 
 ### 📖 API Reference (`api/`)
 Complete API documentation for all public interfaces:
-- **[API Reference](api/API_REFERENCE.md)** - Core API documentation
-- **[Enhanced MA-XLNet API Reference](api/ENHANCED_MA_XLNET_API_REFERENCE.md)** - Enhanced memory features API
+- **[API Reference](api/API_REFERENCE.md)** - Core API documentation ✅ **Verified**
+- **[Enhanced MA-XLNet API Reference](api/ENHANCED_MA_XLNET_API_REFERENCE.md)** - Enhanced memory features API 🚧 **Planned Features**
 - **[MemXLNet QA](api/memxlnet_qa.md)** - Original memory-augmented model documentation
 
 ### 📘 User Guides (`guides/`)
 Step-by-step guides for users and developers:
-- **[Enhanced MA-XLNet Usage Guide](guides/ENHANCED_MA_XLNET_USAGE_GUIDE.md)** - Comprehensive usage guide
+- **[Enhanced MA-XLNet Usage Guide](guides/ENHANCED_MA_XLNET_USAGE_GUIDE.md)** - Comprehensive usage guide 🚧 **Contains Planned Features**
 - **[Enhanced MA-XLNet Quick Reference](guides/ENHANCED_MA_XLNET_QUICK_REFERENCE.md)** - Developer cheat sheet
-- **[Memory Tokens Guide](guides/MEMORY_TOKENS_GUIDE.md)** - Complete guide to memory token systems
+- **[Memory Tokens Guide](guides/MEMORY_TOKENS_GUIDE.md)** - Complete guide to memory token systems ✅ **Verified**
+- **[Streaming Guide](guides/STREAMING_GUIDE.md)** - Memory-efficient data processing ✅ **New**
 - **[Usage Examples](guides/USAGE_EXAMPLES.md)** - Practical examples and patterns
 - **[Testing & Validation Guide](guides/TESTING_VALIDATION_GUIDE.md)** - Testing strategies and validation
 
@@ -22,9 +26,12 @@ Step-by-step guides for users and developers:
 In-depth technical documentation:
 - **[MA-XLNet Implementation](technical/MA_XLNET_IMPLEMENTATION.md)** - Technical implementation details
 - **[Data Flow Diagrams](technical/DATA_FLOW_DIAGRAMS.md)** - Visual representation of data processing
-- **[Data Processing](technical/DATA_PROCESSING.md)** - Data handling and preprocessing
-- **[Unicode and Position Mapping](technical/UNICODE_AND_POSITION_MAPPING.md)** - Character handling
+- **[Data Processing](technical/DATA_PROCESSING.md)** - Data handling and preprocessing ✅ **Verified**
+- **[Unicode and Position Mapping](technical/UNICODE_AND_POSITION_MAPPING.md)** - Character handling ✅ **Verified**
 - **[Changelog Unicode Improvements](technical/CHANGELOG_UNICODE_IMPROVEMENTS.md)** - Recent improvements
+
+### 🔮 Future Features
+- **[Planned Features](PLANNED_FEATURES.md)** - Roadmap for upcoming features 🆕
 
 ## 🚀 Getting Started
 
@@ -45,37 +52,41 @@ In-depth technical documentation:
 
 ## 🎯 Feature Overview
 
-### Enhanced Memory Features (New)
-- ✅ **Differentiable Memory** - Content-based addressing with cosine similarity
-- ✅ **Multi-Head Attention** - Parallel memory operations (1-8 heads)
-- ✅ **Memory Sharpening** - Attention temperature control (0.5-3.0)
-- ✅ **Usage Tracking** - Optimal memory slot allocation
-- ✅ **Temporal Links** - Sequential relationship tracking
-- ✅ **Memory Visualization** - Attention heatmaps and usage patterns
+### Core Features (Implemented & Tested)
+- ✅ **Token-Based Memory** - Learned memory tokens with gated updates
+- ✅ **Time-Step-Major Batching** - Proper memory propagation across segments
+- ✅ **Progressive Training** - Curriculum learning with increasing segments
+- ✅ **Unicode Normalization** - Robust multilingual text handling
+- ✅ **Streaming Processing** - Memory-efficient data loading for large datasets
+- ✅ **Lazy Loading** - On-demand feature loading to reduce RAM usage
+- ✅ **Hub Integration** - Upload/download preprocessed datasets from HuggingFace Hub
+- ✅ **Answer Span Validation** - Multi-strategy answer position mapping
+- ✅ **Phase-2 Warmup** - Staged training with base model freezing
 
 ### Backward Compatibility
-- ✅ **Token-Based Memory** - Original memory system unchanged
 - ✅ **Existing APIs** - All current interfaces preserved
 - ✅ **Configuration** - Default values maintain compatibility
-- ✅ **Save/Load** - Handles both old and new model formats
+- ✅ **Save/Load** - Handles multiple model format versions
+- ✅ **Graceful Fallbacks** - Works with or without optional dependencies
 
-### Multi-Hop Reasoning
-- ✅ **Hop Tracking** - Reasoning chain analysis
-- ✅ **Bridge Entity Detection** - Entity relationship mapping
-- ✅ **Confidence Scoring** - Per-hop and overall confidence
-- ✅ **Error Analysis** - Failed reasoning pattern identification
+### Planned Features (See PLANNED_FEATURES.md)
+- 🚧 **Differentiable Memory** - Content-based addressing with cosine similarity
+- 🚧 **Multi-Head Attention** - Parallel memory operations (1-8 heads)
+- 🚧 **Memory Visualization** - Attention heatmaps and usage patterns
+- 🚧 **Multi-Hop Reasoning** - Hop tracking and bridge entity detection
 
 ## 📊 Memory System Comparison
 
-| Feature | Token-Based | Differentiable | Enhanced |
-|---------|-------------|----------------|----------|
-| **Memory Type** | Discrete tokens | Continuous vectors | Hybrid |
-| **Addressing** | Position-based | Content-based | Both |
-| **Multi-head** | ❌ | ✅ | ✅ |
-| **Usage Tracking** | ❌ | ✅ | ✅ |
-| **Visualization** | Limited | ✅ | ✅ |
-| **Interpretability** | Low | High | High |
-| **Backward Compatible** | ✅ | ✅ | ✅ |
+| Feature | Token-Based (✅ Available) | Differentiable (🚧 Planned) |
+|---------|---------------------------|----------------------------|
+| **Memory Type** | Discrete tokens | Continuous vectors |
+| **Addressing** | Position-based | Content-based |
+| **Multi-head** | ❌ | 🚧 Planned |
+| **Usage Tracking** | ❌ | 🚧 Planned |
+| **Visualization** | Limited | 🚧 Planned |
+| **Interpretability** | Moderate | High (planned) |
+| **Backward Compatible** | ✅ | ✅ (when implemented) |
+| **Production Ready** | ✅ Yes | ❌ No |
 
 ## 🔍 Navigation Guide
 
@@ -129,9 +140,16 @@ All documentation follows these standards:
 
 ## 🔄 Recent Updates
 
+### Version 3.1 (January 2025)
+- ✅ **Documentation Accuracy Update** - Clearly marked planned vs implemented features
+- ✅ Added **PLANNED_FEATURES.md** for roadmap transparency
+- ✅ New **Streaming Guide** for memory-efficient data processing
+- ✅ Updated API reference with lazy loading and Hub integration
+- ✅ Verification badges on all documentation links
+
 ### Version 3.0 (January 2025)
-- ✅ Added enhanced MA-XLNet documentation suite
-- ✅ Complete API reference for new features
+- ✅ Enhanced MA-XLNet design documentation (planned features)
+- ✅ Complete API reference for core features
 - ✅ Comprehensive usage guide with examples
 - ✅ Quick reference for developers
 - ✅ Implementation details and testing results
@@ -162,5 +180,6 @@ For questions about:
 ---
 
 **Last Updated:** January 15, 2025
-**Documentation Version:** 3.0
-**Enhanced MA-XLNet Status:** ✅ Production Ready
+**Documentation Version:** 3.1
+**Core Features Status:** ✅ Production Ready
+**Enhanced Features Status:** 🚧 Planned - See [PLANNED_FEATURES.md](PLANNED_FEATURES.md)

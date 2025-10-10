@@ -1,8 +1,11 @@
 # Enhanced MA-XLNet Quick Reference
 
+> **⚠️ Feature Status:** This guide includes both ✅ **available** and 🚧 **planned** features.
+> See [PLANNED_FEATURES.md](../PLANNED_FEATURES.md) for details.
+
 ## Cheat Sheet for Developers
 
-### 🚀 Quick Setup
+### 🚀 Quick Setup (✅ Available)
 
 ```python
 from memxlnet.models import MemXLNetForQA
@@ -11,26 +14,39 @@ from transformers import XLNetForQuestionAnsweringSimple
 # Load base model
 base = XLNetForQuestionAnsweringSimple.from_pretrained('xlnet-base-cased')
 
-# Enhanced model (recommended)
+# Token-based model (✅ Available)
 model = MemXLNetForQA(
     base_model=base,
     mem_token_count=32,
-    use_differentiable_memory=True,
-    num_memory_heads=4,
-    memory_sharpness=2.0,
-    memory_slots=64
+    memory_init="learned",
+    memory_update="gated"
+)
+```
+
+### 🔮 Enhanced Setup (🚧 Planned - Not Yet Available)
+
+```python
+# This configuration is accepted but features not yet implemented
+model = MemXLNetForQA(
+    base_model=base,
+    mem_token_count=32,
+    use_differentiable_memory=True,  # 🚧 Planned
+    num_memory_heads=4,               # 🚧 Planned
+    memory_sharpness=2.0,             # 🚧 Planned
+    memory_slots=64                   # 🚧 Planned
 )
 ```
 
 ### 📋 Configuration Cheat Sheet
 
-| Use Case | Config |
-|----------|--------|
-| **Backward Compatible** | `use_differentiable_memory=False` |
-| **Basic Enhanced** | `use_differentiable_memory=True, num_memory_heads=2` |
-| **Multi-hop QA** | `use_differentiable_memory=True, num_memory_heads=4, memory_slots=64` |
-| **Complex Reasoning** | `+enable_usage_tracking=True, enable_temporal_links=True` |
-| **Resource Limited** | `memory_slots=16, num_memory_heads=1` |
+| Use Case | Config | Status |
+|----------|--------|--------|
+| **Standard (Token-Based)** | `mem_token_count=32, memory_update="gated"` | ✅ Available |
+| **Progressive Training** | `progressive_segments=[2,4,6]` | ✅ Available |
+| **Lazy Loading** | Use `LazySquadLikeQADataset` | ✅ Available |
+| **Streaming** | Use `StreamingSquadProcessor` | ✅ Available |
+| **Basic Enhanced** | `use_differentiable_memory=True, num_memory_heads=2` | 🚧 Planned |
+| **Multi-hop QA** | `use_differentiable_memory=True, num_memory_heads=4` | 🚧 Planned |
 
 ### 🔧 Training Configuration
 
@@ -221,23 +237,26 @@ assert 'memory_info' not in outputs_compat, "Should not have memory_info"
 
 ### 📝 Key Files
 
-| File | Purpose |
-|------|---------|
-| `src/memory_modules.py` | Core memory implementation |
-| `src/memxlnet_qa.py` | Enhanced model wrapper |
-| `src/multihop_utils.py` | Reasoning utilities |
-| `examples/multihop_ma_xlnet.py` | Usage examples |
-| `tests/unit/test_memory.py` | Test suite |
+| File | Purpose | Status |
+|------|---------|--------|
+| `src/memxlnet/models/memory_modules.py` | Core memory implementation | 🔨 Partial |
+| `src/memxlnet/models/memxlnet_qa.py` | Enhanced model wrapper | ✅ Available |
+| `src/memxlnet/data/streaming.py` | Streaming processor | ✅ Available |
+| `examples/validate_answer_spans.py` | Usage examples | ✅ Available |
+| `tests/unit/test_answer_span_validation.py` | Test suite | ✅ Available |
 
 ### 🎯 Quick Validation
 
 ```bash
 # Run tests
-python tests/unit/test_memory.py
+pytest tests/unit/
 
 # Test example
-python examples/multihop_ma_xlnet.py
+python examples/validate_answer_spans.py
 
 # Check imports
 python -c "from memxlnet.models import MemXLNetForQA; print('✅ Ready')"
+
+# Test streaming
+python -c "from memxlnet.data.streaming import StreamingSquadProcessor; print('✅ Streaming Ready')"
 ```
