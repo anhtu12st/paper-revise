@@ -143,10 +143,12 @@ def _process_example(self, example, example_idx, tokenizer, max_seq_length, doc_
 Original Context: "The Super Bowl is the annual championship game of the National Football League..."
                   (1500 characters, ~300 tokens)
 
-Segment 1: [CLS] question [SEP] context[0:250] [SEP] [PAD]...
-Segment 2: [CLS] question [SEP] context[186:436] [SEP] [PAD]... (64 token overlap)
-Segment 3: [CLS] question [SEP] context[372:622] [SEP] [PAD]...
+Segment 1: [PAD]... context[0:250] [SEP] question [SEP] [CLS]
+Segment 2: [PAD]... context[186:436] [SEP] question [SEP] [CLS] (64 token overlap)
+Segment 3: [PAD]... context[372:622] [SEP] question [SEP] [CLS]
 ```
+
+**Note**: XLNet uses left-padding and places the CLS token at the **end** of sequences, unlike BERT which uses right-padding with CLS at the start.
 
 ## Memory Token Integration
 
@@ -183,11 +185,13 @@ def configure_memory_tokens(tokenizer, memory_num_tokens):
 ### Memory Token Usage in Sequences
 
 ```
-Without Memory: [CLS] question [SEP] context [SEP] [PAD]...
+Without Memory: [PAD]... context [SEP] question [SEP] [CLS]
 
-With Memory:    [CLS] [MEM_READ_0] [MEM_READ_1] ... question [SEP]
-                context [MEM_WRITE_0] [MEM_WRITE_1] ... [SEP] [PAD]...
+With Memory:    [PAD]... context [MEM_WRITE_0] [MEM_WRITE_1] ... [SEP]
+                [MEM_READ_0] [MEM_READ_1] ... question [SEP] [CLS]
 ```
+
+**XLNet-specific ordering**: Context comes first, question second, CLS at end. Memory READ tokens appear with the question (at the end), WRITE tokens appear with the context (earlier in sequence).
 
 ### Memory Token Processing
 

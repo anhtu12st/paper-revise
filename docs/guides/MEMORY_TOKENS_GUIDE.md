@@ -62,22 +62,25 @@ WRITE_TOKENS = [
 
 ### Memory Token Placement Strategy
 
-#### Standard Sequence Format
+#### Standard Sequence Format (XLNet)
 ```
-[CLS] question_tokens [SEP] context_tokens [SEP] [PAD] [PAD] [PAD]
+[PAD] [PAD] [PAD] ... context_tokens [SEP] question_tokens [SEP] [CLS]
 ```
 
-#### Memory-Enhanced Sequence Format
+#### Memory-Enhanced Sequence Format (XLNet)
 ```
-[CLS] [MEM_READ_0] [MEM_READ_1] ... [MEM_READ_N-1] question_tokens [SEP]
-context_tokens [MEM_WRITE_0] [MEM_WRITE_1] ... [MEM_WRITE_N-1] [SEP] [PAD] [PAD]
+[PAD] [PAD] ... context_tokens [MEM_WRITE_0] [MEM_WRITE_1] ... [MEM_WRITE_N-1] [SEP]
+[MEM_READ_0] [MEM_READ_1] ... [MEM_READ_N-1] question_tokens [SEP] [CLS]
 ```
+
+**Important**: XLNet uses **left-padding** and places the **CLS token at the end**, unlike BERT's right-padding with CLS at the start. This affects memory token placement.
 
 #### Placement Rationale
 
-1. **READ tokens after CLS**: Early access to memory for question processing
-2. **WRITE tokens in context**: Memory updates based on context understanding
+1. **WRITE tokens in context**: Memory updates based on context understanding (appears earlier in sequence)
+2. **READ tokens with question**: Access to updated memory when processing question (appears later, near CLS)
 3. **Symmetric design**: Same number of read and write tokens for balanced flow
+4. **XLNet-compatible**: Respects XLNet's reversed token ordering (context → question → CLS)
 
 ### Memory Dimension Compatibility
 

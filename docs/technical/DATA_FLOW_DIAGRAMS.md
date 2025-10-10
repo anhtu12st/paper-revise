@@ -46,7 +46,7 @@ Input: {question, context, answers}
   └─ Segment N: question + context[...] + overlap
   ↓
 [Memory Token Addition]
-  ├─ [CLS] [MEM_READ_0] ... question [SEP] context [MEM_WRITE_0] ... [SEP]
+  ├─ [PAD]... context [MEM_WRITE_0] ... [SEP] [MEM_READ_0] ... question [SEP] [CLS]
   └─ Vocabulary: 32000 → 32000 + 2*memory_num_tokens
   ↓
 [Feature Creation]
@@ -79,28 +79,30 @@ Original Document (1500 chars):
 
 Segmentation with max_seq_length=384, doc_stride=64:
 
-Segment 1:
+Segment 1 (XLNet format):
 ┌─────────────────────────────────────────────────────────────────┐
-│ [CLS] Which team won? [SEP] The Super Bowl is the annual       │
-│ championship game of the National Football League (NFL)...     │
-│ [384 tokens total] [SEP] [PAD] [PAD] [PAD]                     │
+│ [PAD] [PAD] ... The Super Bowl is the annual championship game │
+│ of the National Football League (NFL)... [SEP] Which team won? │
+│ [SEP] [CLS] [384 tokens total]                                 │
 └─────────────────────────────────────────────────────────────────┘
-           ↑_question_↑      ↑____________context____________↑
+   ↑_padding_↑ ↑____________context____________↑    ↑_question_↑
 
 Segment 2 (64 token overlap):
 ┌─────────────────────────────────────────────────────────────────┐
-│ [CLS] Which team won? [SEP] ...Football League (NFL) in the    │
-│ United States, culminating a season that begins...             │
-│ [384 tokens total] [SEP] [PAD] [PAD] [PAD]                     │
+│ [PAD] ... ...Football League (NFL) in the United States,       │
+│ culminating a season that begins... [SEP] Which team won? [SEP]│
+│ [CLS] [384 tokens total]                                        │
 └─────────────────────────────────────────────────────────────────┘
-                                ↑_____overlap_____↑
+             ↑_____overlap_____↑
 
 Segment 3:
 ┌─────────────────────────────────────────────────────────────────┐
-│ [CLS] Which team won? [SEP] ...season that begins in the late  │
-│ summer of the previous year and ends in early February...      │
-│ [384 tokens total] [SEP] [PAD] [PAD] [PAD]                     │
+│ [PAD] ... ...season that begins in the late summer of the      │
+│ previous year and ends in early February... [SEP] Which team   │
+│ won? [SEP] [CLS] [384 tokens total]                            │
 └─────────────────────────────────────────────────────────────────┘
+
+Note: XLNet uses left-padding and places CLS at the END (position 383 for max_length=384)
 ```
 
 ### Segmentation Algorithm Flow
@@ -148,20 +150,20 @@ Token ID Mapping:
 [MEM_READ_3]  → 32003    [MEM_WRITE_3] → 32007
 ```
 
-### Memory Token Placement in Sequences
+### Memory Token Placement in Sequences (XLNet)
 
 ```
 Standard Sequence:
 ┌─────────────────────────────────────────────────────────────────┐
-│ [CLS] question tokens [SEP] context tokens [SEP] [PAD] [PAD]   │
+│ [PAD] [PAD] ... context tokens [SEP] question tokens [SEP] [CLS]│
 └─────────────────────────────────────────────────────────────────┘
 
 Memory-Enhanced Sequence:
 ┌─────────────────────────────────────────────────────────────────┐
-│ [CLS] [MEM_READ_0] [MEM_READ_1] question [SEP] context         │
-│ [MEM_WRITE_0] [MEM_WRITE_1] [SEP] [PAD] [PAD]                 │
+│ [PAD] ... context [MEM_WRITE_0] [MEM_WRITE_1] ... [SEP]        │
+│ [MEM_READ_0] [MEM_READ_1] ... question [SEP] [CLS]             │
 └─────────────────────────────────────────────────────────────────┘
-        ↑_____read_____↑                        ↑____write____↑
+            ↑____write____↑                ↑_____read_____↑
 
 Processing Flow:
 1. READ tokens → embeddings replaced with memory state
@@ -297,20 +299,20 @@ Original Context with Answer:
 └─────────────────────────────────────────────────────────────────┘
          ↑_____________Answer: "Denver Broncos"_____________↑
 
-After Segmentation:
+After Segmentation (XLNet format):
 Segment 1:
 ┌─────────────────────────────────────────────────────────────────┐
-│ [CLS] Who won? [SEP] The Denver Broncos defeated the Carolina  │
-│ Panthers 24-10 to win Super Bowl 50... [SEP]                  │
+│ [PAD]... The Denver Broncos defeated the Carolina Panthers    │
+│ 24-10 to win Super Bowl 50... [SEP] Who won? [SEP] [CLS]      │
 └─────────────────────────────────────────────────────────────────┘
-                         ↑___Answer Here___↑
+          ↑___Answer Here___↑
 
 Segment 2:
 ┌─────────────────────────────────────────────────────────────────┐
-│ [CLS] Who won? [SEP] ...to win Super Bowl 50. The game was    │
-│ played on February 7, 2016... [SEP]                           │
+│ [PAD]... ...to win Super Bowl 50. The game was played on      │
+│ February 7, 2016... [SEP] Who won? [SEP] [CLS]                │
 └─────────────────────────────────────────────────────────────────┘
-                         ↑_No Answer Here_↑
+          ↑_No Answer Here_↑
 ```
 
 ### Answer Position Mapping Algorithm
@@ -339,16 +341,17 @@ Text: "The Denver Broncos defeated..."
 Chars: 0123456789012345678901234567...
 Answer: "Denver Broncos" (chars 4-17)
 
-Tokenization:
-Token 0: [CLS]     → chars (0,0)
-Token 1: Who       → chars (0,3)
-Token 2: won       → chars (4,7)
-Token 3: ?         → chars (8,9)
-Token 4: [SEP]     → chars (0,0)
-Token 5: The       → chars (0,3)
-Token 6: Denver    → chars (4,10)    ← Answer start
-Token 7: Broncos   → chars (11,18)   ← Answer end
-Token 8: defeated  → chars (19,27)
+Tokenization (XLNet - simplified, ignoring padding):
+Token 0: The       → chars (0,3)     [Context start]
+Token 1: Denver    → chars (4,10)    ← Answer start
+Token 2: Broncos   → chars (11,18)   ← Answer end
+Token 3: defeated  → chars (19,27)
+...
+Token N-4: [SEP]   → chars (0,0)     [Context/Question separator]
+Token N-3: Who     → chars (0,3)     [Question start]
+Token N-2: won?    → chars (4,8)
+Token N-1: [SEP]   → chars (0,0)
+Token N:   [CLS]   → chars (0,0)     [At position 383 for max_length=384]
 ...
 
 Mapping Result:
