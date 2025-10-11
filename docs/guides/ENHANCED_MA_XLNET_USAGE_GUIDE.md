@@ -1,21 +1,23 @@
 # Enhanced MA-XLNet Usage Guide
 
-> **⚠️ IMPORTANT - Feature Availability Notice:**
+> **✅ Feature Availability Notice (Updated January 2025):**
 >
 > This guide describes both **implemented** and **planned** features for MemXLNet-QA.
 >
 > **✅ Currently Available:**
-> - Token-based memory (sections 1-2)
+> - Token-based memory
+> - **Differentiable memory with MemoryController** ✅ **NEW!**
+> - **Multi-head attention** ✅ **NEW!**
+> - **Usage tracking and temporal links** ✅ **NEW!**
 > - Basic training and configuration
 > - Progressive training
 >
 > **🚧 Planned Features (Not Yet Implemented):**
-> - Differentiable memory with MemoryController
 > - HopTracker and multi-hop reasoning utilities
 > - MemoryVisualizer and attention visualization
-> - Multi-head attention
+> - Advanced memory features (adaptive allocation, compression, etc.)
 >
-> See [PLANNED_FEATURES.md](../PLANNED_FEATURES.md) for implementation status and roadmap.
+> See [PLANNED_FEATURES.md](../PLANNED_FEATURES.md) for complete implementation status.
 
 ## Overview
 
@@ -69,21 +71,23 @@ model = MemXLNetForQA(
 )
 ```
 
-### Enhanced Setup (🚧 Planned - Not Yet Available)
+### Enhanced Setup with Differentiable Memory (✅ Available Now!)
 
 ```python
-# This configuration is accepted but differentiable memory is not yet implemented
-# The model will fall back to token-based memory with a warning
+# Differentiable memory is now fully implemented and tested!
 
 model = MemXLNetForQA(
     base_model=base_model,
     mem_token_count=32,
-    use_differentiable_memory=True,  # 🚧 Planned - will warn and use token-based
-    num_memory_heads=4,               # 🚧 Planned
-    memory_sharpness=2.0,             # 🚧 Planned
-    enable_usage_tracking=True,       # 🚧 Planned
-    memory_slots=64                   # 🚧 Planned
+    use_differentiable_memory=True,  # ✅ Fully functional
+    num_memory_heads=4,               # ✅ Multi-head attention working
+    memory_sharpness=2.0,             # ✅ Attention sharpening working
+    enable_usage_tracking=True,       # ✅ Usage tracking operational
+    enable_temporal_links=True,       # ✅ Temporal links functional
+    memory_slots=64                   # ✅ Configurable memory slots
 )
+
+# See examples/train_with_differentiable_memory.py for a complete working example
 ```
 
 ## Configuration Options

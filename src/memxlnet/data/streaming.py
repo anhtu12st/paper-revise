@@ -55,7 +55,7 @@ class StreamingSquadProcessor:
         self,
         tokenizer: PreTrainedTokenizerBase,
         max_seq_length: int = 384,
-        doc_stride: int = 128,
+        doc_stride: int = 64,
         streaming_chunk_size: int = 1000,
         max_memory_gb: float = 8.0,
     ):
@@ -445,7 +445,7 @@ class StreamingSquadProcessor:
 def create_streaming_processor(
     tokenizer: PreTrainedTokenizerBase,
     max_seq_length: int = 384,
-    doc_stride: int = 128,
+    doc_stride: int = 64,
     streaming_chunk_size: int = 1000,
     max_memory_gb: float = 8.0,
 ) -> StreamingSquadProcessor:

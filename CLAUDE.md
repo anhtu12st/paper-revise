@@ -107,27 +107,58 @@ print('✅ All imports successful')
 - **Status**: ✅ FIXED in `src/memxlnet/data/dataset.py`
 - If you see 0% no-answer predictions or low F1, verify CLS handling
 
-### 2. Memory Token System
+### 2. Differentiable Memory System (✅ NEW - January 2025)
+**Alternative to token-based memory** with content-based addressing and multi-head attention:
+- **Status**: ✅ Fully implemented and tested (Phase 1 complete)
+- **Features**: Multi-head attention (1-8 heads), usage tracking, temporal links
+- **Test Coverage**: 39 tests (26 unit + 13 integration)
+- **Example**: `examples/train_with_differentiable_memory.py`
+
+**Quick Start:**
+```python
+from memxlnet.models import MemXLNetForQA
+
+model = MemXLNetForQA(
+    base_model=base_model,
+    mem_token_count=16,
+    use_differentiable_memory=True,  # Enable differentiable memory
+    num_memory_heads=4,               # Multi-head attention
+    memory_sharpness=2.0,             # Attention sharpening
+    enable_usage_tracking=True,       # Track slot usage
+    enable_temporal_links=True,       # Track relationships
+    memory_slots=32,                  # Number of memory slots
+)
+
+# Access memory information in outputs
+outputs = model(**inputs)
+if "memory_info" in outputs:
+    memory_info = outputs["memory_info"]
+    # Contains: read_weights, write_weights, memory_state, usage, temporal_links
+```
+
+**See**: [Planned Features](docs/PLANNED_FEATURES.md) for details and Phase 2 roadmap
+
+### 3. Memory Token System (Traditional)
 Memory uses explicit special tokens:
 - `[MEM_READ_i]` - Read from memory (injected at segment start)
 - `[MEM_WRITE_i]` - Write to memory (positioned in sequence)
 - Tokens automatically added to tokenizer vocabulary
 - See [Memory Tokens Guide](docs/guides/MEMORY_TOKENS_GUIDE.md) for details
 
-### 3. Time-Step-Major Batching
+### 4. Time-Step-Major Batching
 Required for memory propagation across document segments:
 - Standard: `[doc1_seg1, doc1_seg2] → [doc2_seg1, doc2_seg2]`
 - Time-step-major: `[doc1_seg1, doc2_seg1] → [doc1_seg2, doc2_seg2]`
 - Implemented in `TimeStepMajorDataLoader`
 - See [Data Processing](docs/technical/DATA_PROCESSING.md) for details
 
-### 4. Progressive Training
+### 5. Progressive Training
 Curriculum learning with increasing segment counts:
 - Example: `progressive_segments=[2, 4, 6]` trains 2→4→6 segments
 - Creates subdirectories: `stage_1_segs_2/`, `stage_2_segs_4/`, etc.
 - See [Implementation Details](docs/technical/MA_XLNET_IMPLEMENTATION.md)
 
-### 5. Phase-2 Warmup Controls
+### 6. Phase-2 Warmup Controls
 Fine-grained control over model warmup for stable memory-augmented training:
 
 #### `warmup_freeze_base_epochs` (default: 1)

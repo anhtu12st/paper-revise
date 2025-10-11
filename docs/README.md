@@ -69,24 +69,31 @@ In-depth technical documentation:
 - ✅ **Save/Load** - Handles multiple model format versions
 - ✅ **Graceful Fallbacks** - Works with or without optional dependencies
 
+### Recently Completed (January 2025)
+- ✅ **Differentiable Memory** - Content-based addressing with cosine similarity
+- ✅ **Multi-Head Attention** - Parallel memory operations (1-8 heads)
+- ✅ **Usage Tracking** - Memory slot usage optimization
+- ✅ **Temporal Links** - Relationship tracking between memory slots
+
 ### Planned Features (See PLANNED_FEATURES.md)
-- 🚧 **Differentiable Memory** - Content-based addressing with cosine similarity
-- 🚧 **Multi-Head Attention** - Parallel memory operations (1-8 heads)
 - 🚧 **Memory Visualization** - Attention heatmaps and usage patterns
 - 🚧 **Multi-Hop Reasoning** - Hop tracking and bridge entity detection
+- 🚧 **Advanced Memory Features** - Adaptive allocation, compression, persistence
 
 ## 📊 Memory System Comparison
 
-| Feature | Token-Based (✅ Available) | Differentiable (🚧 Planned) |
+| Feature | Token-Based (✅ Available) | Differentiable (✅ Available) |
 |---------|---------------------------|----------------------------|
 | **Memory Type** | Discrete tokens | Continuous vectors |
 | **Addressing** | Position-based | Content-based |
-| **Multi-head** | ❌ | 🚧 Planned |
-| **Usage Tracking** | ❌ | 🚧 Planned |
-| **Visualization** | Limited | 🚧 Planned |
-| **Interpretability** | Moderate | High (planned) |
-| **Backward Compatible** | ✅ | ✅ (when implemented) |
-| **Production Ready** | ✅ Yes | ❌ No |
+| **Multi-head** | ❌ | ✅ 1-8 heads |
+| **Usage Tracking** | ❌ | ✅ Available |
+| **Temporal Links** | ❌ | ✅ Available |
+| **Visualization** | Limited | ✅ Data export |
+| **Interpretability** | Moderate | High |
+| **Backward Compatible** | ✅ | ✅ |
+| **Production Ready** | ✅ Yes | ✅ Yes (Phase 1) |
+| **Test Coverage** | ✅ | ✅ 39 tests |
 
 ## 🔍 Navigation Guide
 
@@ -139,6 +146,14 @@ All documentation follows these standards:
 - **Troubleshooting** guides with solutions
 
 ## 🔄 Recent Updates
+
+### Version 3.2 (January 2025) - Phase 1 Complete!
+- ✅ **Differentiable Memory Implementation** - Fully functional with all features
+- ✅ **Multi-Head Attention** - 1-8 heads supported and tested
+- ✅ **Usage Tracking & Temporal Links** - Operational and validated
+- ✅ **Comprehensive Test Suite** - 39 tests (26 unit + 13 integration)
+- ✅ **Example Script** - `examples/train_with_differentiable_memory.py`
+- ✅ **Documentation Updates** - All docs reflect Phase 1 completion
 
 ### Version 3.1 (January 2025)
 - ✅ **Documentation Accuracy Update** - Clearly marked planned vs implemented features
