@@ -106,8 +106,13 @@ class MemXLNetForQA(nn.Module):
             device: Target device for memory tensors
 
         Returns:
-            Memory state tensor of shape (batch_size, mem_token_count, memory_dim)
+            Memory state tensor of shape (batch_size, mem_token_count or memory_slots, memory_dim)
         """
+        # If using differentiable memory, return shape matching memory_slots
+        if self.use_differentiable_memory and self.memory_controller is not None:
+            # Return zeros with memory_slots dimension
+            return torch.zeros(batch_size, self.memory_slots, self.memory_dim, device=device)
+
         if self.mem_token_count == 0:
             # Return empty tensor if no memory tokens
             return torch.zeros(batch_size, 0, self.memory_dim, device=device)
@@ -303,7 +308,13 @@ class MemXLNetForQA(nn.Module):
 
                 # The memory_output can be used to modulate the final predictions
                 # For now, we keep the original logits but store memory info
-                new_memory_state: torch.Tensor | None = self.memory_controller.get_memory_state()
+                # Get memory state and expand to batch dimension
+                memory_state_unbatched = self.memory_controller.get_memory_state()  # [num_slots, memory_dim]
+                # Expand to batch dimension - replicate for each batch element
+                new_memory_state: torch.Tensor | None = (
+                    memory_state_unbatched.unsqueeze(0).expand(batch_size, -1, -1).clone()
+                )
+                # Shape: [batch_size, memory_slots, memory_dim]
             else:
                 new_memory_state = memory_state
         else:

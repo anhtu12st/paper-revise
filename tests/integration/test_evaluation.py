@@ -257,7 +257,7 @@ def main():
     # Configuration
     checkpoint_path = "outputs/xlnet-squad-phase2-1/stage_1_segs_1/best_model"
     device = torch.device("cpu")
-    test_size = None  # Set to None for full dataset, or integer for subset (e.g., 100)
+    test_size = 200  # Set to None for full dataset, or integer for subset (e.g., 100)
 
     print(f"Loading model from: {checkpoint_path}")
     model = MemXLNetForQA.from_pretrained(checkpoint_path)
