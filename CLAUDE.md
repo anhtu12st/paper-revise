@@ -1,6 +1,6 @@
-# CLAUDE.md - Developer Quick Reference
+# CLAUDE.md
 
-This file provides quick guidance for Claude Code when working with this repository.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview
 
@@ -31,9 +31,11 @@ paper-revise/
 ├── scripts/               # Executable scripts
 │   ├── train.py                       # Basic training
 │   ├── evaluate.py                    # Model evaluation
+│   ├── evaluate_cls_fix.py            # Hub-first evaluation with CLS fix
 │   ├── phase2_train.py                # Phase 2 training (recommended)
 │   ├── train_memxlnet_squad.py        # Hub-integrated training
-│   └── preprocess_and_upload_to_hub.py  # Dataset preprocessing for Hub
+│   ├── preprocess_and_upload_to_hub.py  # Dataset preprocessing for Hub
+│   └── upload_checkpoint_to_hub.py    # Upload checkpoints to Hub
 ├── tests/                 # Test suite (unit/, integration/)
 ├── docs/                  # Documentation (api/, guides/, technical/)
 ├── notebooks/             # Interactive analysis notebooks
@@ -66,7 +68,14 @@ print('✅ Trainer initialized')
 
 ### Basic Evaluation
 ```bash
-# Evaluate trained model
+# Evaluate from HuggingFace Hub (recommended for cross-server reproducibility)
+export HF_TOKEN='your_token'  # if model is private
+uv run python scripts/evaluate_cls_fix.py --model-id username/memxlnet-squad-phase2-mem16
+
+# Quick test with subset (100 examples)
+uv run python scripts/evaluate_cls_fix.py --model-id username/memxlnet-squad-phase2-mem16 --test-size 100
+
+# Evaluate local checkpoint (legacy)
 uv run python scripts/evaluate.py outputs/xlnet-squad-phase2-1/training_config.json
 
 # Run test suite
@@ -317,8 +326,97 @@ model = MemXLNetForQA.from_pretrained("username/memxlnet-squad")
 tokenizer = XLNetTokenizerFast.from_pretrained("username/memxlnet-squad")
 ```
 
-### Manual Upload
-Use the provided notebook for one-time uploads:
+### HuggingFace Naming Conventions
+
+MemXLNet follows standardized naming patterns for Hub repositories:
+
+**Dataset repositories:**
+```
+{username}/memxlnet-squad-mem{N}
+
+Examples:
+- anhtu12st/memxlnet-squad-mem0   (no memory tokens)
+- anhtu12st/memxlnet-squad-mem8   (8 memory tokens)
+- anhtu12st/memxlnet-squad-mem16  (16 memory tokens)
+```
+
+**Model repositories:**
+```
+{username}/memxlnet-squad-{variant}
+
+Common variants:
+- memxlnet-squad-phase2-mem16  (Phase 2 trained, 16 memory tokens)
+- memxlnet-squad-phase2-mem8   (Phase 2 trained, 8 memory tokens)
+- memxlnet-squad-baseline      (no memory tokens)
+- memxlnet-squad-cls-fixed     (with CLS position bug fix)
+```
+
+**Revisions/Tags within repositories:**
+```
+- best-model     (default, latest best checkpoint)
+- stage-1-segs-1 (training stage checkpoints)
+- stage-1-segs-2
+- v1.0, v2.0     (version tags)
+```
+
+### Upload Checkpoints to Hub
+
+Upload local checkpoints for cross-server evaluation:
+
+```bash
+# Upload checkpoint to Hub
+export HF_TOKEN='your_token'
+python scripts/upload_checkpoint_to_hub.py \
+    --checkpoint-path outputs/xlnet-squad-phase2-1/stage_1_segs_1/best_model \
+    --hub-id anhtu12st/memxlnet-squad-phase2-mem16 \
+    --revision stage-1-segs-1
+
+# Dry run (validate without uploading)
+python scripts/upload_checkpoint_to_hub.py \
+    --checkpoint-path outputs/my-model/best_model \
+    --hub-id username/memxlnet-squad-phase2-mem16 \
+    --dry-run
+
+# Create private repository
+python scripts/upload_checkpoint_to_hub.py \
+    --checkpoint-path outputs/my-model/best_model \
+    --hub-id username/memxlnet-squad-phase2-mem16 \
+    --private
+```
+
+### Hub-First Evaluation
+
+Evaluate models directly from HuggingFace Hub (recommended for reproducibility):
+
+```bash
+# Full dataset evaluation
+python scripts/evaluate_cls_fix.py \
+    --model-id anhtu12st/memxlnet-squad-phase2-mem16
+
+# Specific revision
+python scripts/evaluate_cls_fix.py \
+    --model-id anhtu12st/memxlnet-squad-phase2-mem16 \
+    --revision stage-1-segs-1
+
+# Quick test (100 examples)
+python scripts/evaluate_cls_fix.py \
+    --model-id anhtu12st/memxlnet-squad-phase2-mem16 \
+    --test-size 100
+
+# Custom output directory
+python scripts/evaluate_cls_fix.py \
+    --model-id anhtu12st/memxlnet-squad-phase2-mem16 \
+    --output-dir ./my_results
+```
+
+**Benefits of Hub-first evaluation:**
+- ✅ Works on any server without local checkpoints
+- ✅ Reproducible across environments
+- ✅ Versioned via Hub revisions/tags
+- ✅ No large files in git
+
+### Manual Upload (Alternative)
+Use the provided notebook for interactive uploads:
 ```bash
 jupyter notebook notebooks/upload_to_huggingface.ipynb
 ```
@@ -328,6 +426,8 @@ jupyter notebook notebooks/upload_to_huggingface.ipynb
 | Task | Documentation |
 |------|---------------|
 | Train a model | [Usage Guide](docs/guides/ENHANCED_MA_XLNET_USAGE_GUIDE.md) |
+| Evaluate from Hub | `scripts/evaluate_cls_fix.py --model-id username/model` (see above) |
+| Upload checkpoint to Hub | `scripts/upload_checkpoint_to_hub.py` (see Hub Integration section) |
 | Configure memory | [Memory Tokens Guide](docs/guides/MEMORY_TOKENS_GUIDE.md) |
 | Stream large datasets | [Streaming Guide](docs/guides/STREAMING_GUIDE.md) |
 | Hub integration | [API Reference](docs/api/API_REFERENCE.md#hub-integration) |

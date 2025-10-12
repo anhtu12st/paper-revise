@@ -1,16 +1,66 @@
 #!/usr/bin/env python3
 """
-Test script to run evaluation with CLS position fixes and measure performance improvement.
+Hub-First Evaluation Script for MemXLNet-QA with CLS Position Fix
+==================================================================
+
+This script evaluates MemXLNet models from HuggingFace Hub with the FIXED CLS
+position logic. It measures performance improvement after the CLS bug fix.
+
+MANDATORY: All models must be on HuggingFace Hub for cross-server reproducibility.
+
+CLS POSITION BUG:
+-----------------
+XLNet places CLS token at the END of sequences (position 383), not position 0.
+The hardcoded CLS position bug caused 40+ point F1 drops. This script uses the
+FIXED implementation that reads actual CLS indices from batch data.
+
+SETUP:
+------
+1. Set HF_TOKEN environment variable (if model is private):
+   export HF_TOKEN='your_huggingface_token'
+
+2. Configure HUB_USERNAME below (line 58) OR pass via --model-id
+
+3. Run evaluation:
+   python scripts/evaluate_cls_fix.py --model-id username/memxlnet-squad-phase2-mem16
 
 USAGE:
-- Set test_size = None in main() for full dataset evaluation (all 11,873 examples)
-- Set test_size = 100 in main() for subset evaluation (100 examples)
-- Results are saved to different files: fixed_evaluation_results_FULL.json vs fixed_evaluation_results.json
+------
+# Full dataset evaluation
+python scripts/evaluate_cls_fix.py --model-id anhtu12st/memxlnet-squad-phase2-mem16
+
+# Specific revision/checkpoint
+python scripts/evaluate_cls_fix.py --model-id anhtu12st/memxlnet-squad-phase2-mem16 --revision stage-1-segs-1
+
+# Quick test with 100 examples
+python scripts/evaluate_cls_fix.py --model-id anhtu12st/memxlnet-squad-phase2-mem16 --test-size 100
+
+# Custom output directory
+python scripts/evaluate_cls_fix.py --model-id anhtu12st/memxlnet-squad-phase2-mem16 --output-dir ./my_results
+
+HUGGINGFACE NAMING CONVENTION:
+------------------------------
+Model repositories follow the pattern:
+  {username}/memxlnet-squad-{variant}
+
+Common variants:
+  - memxlnet-squad-phase2-mem16  (Phase 2 trained, 16 memory tokens)
+  - memxlnet-squad-phase2-mem8   (Phase 2 trained, 8 memory tokens)
+  - memxlnet-squad-baseline      (No memory tokens)
+
+Revisions/Tags within each repo:
+  - best-model     (default, latest best checkpoint)
+  - stage-1-segs-1 (training stage checkpoints)
+  - stage-1-segs-2
+  - v1.0, v2.0     (version tags)
 """
 
+import argparse
 import json
 import os
+import sys
 from collections import defaultdict
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -18,13 +68,30 @@ from datasets import load_dataset
 from tqdm.auto import tqdm
 from transformers import XLNetTokenizerFast
 
-from memxlnet.data import create_dataloader, load_chunked_dataset
+# Add src to path for direct script execution
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-# Import components
+from memxlnet.data import create_dataloader, load_chunked_dataset
 from memxlnet.models.memxlnet_qa import MemXLNetForQA
+
+# ============================================================================
+# CONFIGURATION - MODIFY THESE VALUES
+# ============================================================================
+
+# Your HuggingFace username (used for default model ID)
+HUB_USERNAME = "anhtu12st"  # Change this to your username!
+
+# Default model ID (can be overridden via --model-id)
+DEFAULT_MODEL_ID = f"{HUB_USERNAME}/memxlnet-squad-phase2-mem16"
+
+
+# ============================================================================
+# EVALUATION LOGIC
+# ============================================================================
 
 
 def compute_metrics(predictions, examples):
+    """Compute SQuAD v2 metrics (F1, EM) with has-answer / no-answer breakdown."""
     import re
     import string
 
@@ -250,48 +317,155 @@ def aggregate_predictions(predictions, total_examples):
     return final_predictions
 
 
+# ============================================================================
+# MAIN EVALUATION
+# ============================================================================
+
+
 def main():
-    print("🚀 Testing MemXLNet-QA Evaluation with CLS Position Fix")
-    print("=" * 60)
+    """Main evaluation entry point."""
+    parser = argparse.ArgumentParser(
+        description="Evaluate MemXLNet-QA model from HuggingFace Hub with CLS position fix",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
 
-    # Configuration
-    checkpoint_path = "outputs/xlnet-squad-phase2-1/stage_1_segs_1/best_model"
-    device = torch.device("cpu")
-    test_size = None  # Set to None for full dataset, or integer for subset (e.g., 100)
+    parser.add_argument(
+        "--model-id",
+        type=str,
+        default=DEFAULT_MODEL_ID,
+        help=f"HuggingFace model ID (default: {DEFAULT_MODEL_ID})",
+    )
+    parser.add_argument(
+        "--revision",
+        type=str,
+        default=None,
+        help="Model revision/tag (e.g., 'stage-1-segs-1', 'v1.0'). Default: latest",
+    )
+    parser.add_argument(
+        "--test-size",
+        type=int,
+        default=None,
+        help="Number of examples to evaluate (default: None = full dataset)",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default="./results",
+        help="Output directory for results (default: ./results)",
+    )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default=None,
+        help="Device to use (cuda/cpu). Default: auto-detect",
+    )
+    parser.add_argument(
+        "--no-answer-threshold",
+        type=float,
+        default=1.5,
+        help="Threshold for no-answer prediction (default: 1.5)",
+    )
+    parser.add_argument(
+        "--max-answer-length",
+        type=int,
+        default=30,
+        help="Maximum answer length in tokens (default: 30)",
+    )
 
-    print(f"Loading model from: {checkpoint_path}")
-    model = MemXLNetForQA.from_pretrained(checkpoint_path)
+    args = parser.parse_args()
+
+    # Print header
+    print("=" * 80)
+    print("🚀 MemXLNet-QA Evaluation with CLS Position Fix (Hub-First)")
+    print("=" * 80)
+    print()
+
+    # Validate Hub configuration
+    if not args.model_id:
+        print("❌ Error: --model-id is required!")
+        print("   Example: --model-id anhtu12st/memxlnet-squad-phase2-mem16")
+        return 1
+
+    # Check for HF token (for private models)
+    hf_token = os.environ.get("HF_TOKEN")
+    if not hf_token:
+        print("⚠️  Warning: HF_TOKEN not set. Private models will fail to load.")
+        print("   Set with: export HF_TOKEN='your_token'")
+        print()
+
+    # Device selection
+    if args.device:
+        device = torch.device(args.device)
+    else:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    print("📊 Configuration:")
+    print(f"   • Model ID: {args.model_id}")
+    if args.revision:
+        print(f"   • Revision: {args.revision}")
+    eval_type = "full dataset" if args.test_size is None else f"{args.test_size} examples"
+    print(f"   • Test size: {eval_type}")
+    print(f"   • Device: {device}")
+    print(f"   • Output: {args.output_dir}")
+    print()
+
+    # Load model from Hub
+    print(f"📥 Loading model from HuggingFace Hub: {args.model_id}")
+    try:
+        model = MemXLNetForQA.from_pretrained(args.model_id, revision=args.revision)
+        tokenizer = XLNetTokenizerFast.from_pretrained(args.model_id, revision=args.revision)
+        print(f"✅ Model loaded: {model.mem_token_count} memory tokens")
+    except Exception as e:
+        print(f"❌ Failed to load model from Hub: {e}")
+        print()
+        print("💡 Troubleshooting:")
+        print("   1. Check model ID is correct")
+        print("   2. If model is private, set HF_TOKEN environment variable")
+        print("   3. Check internet connection")
+        print(f"   4. Verify model exists: https://huggingface.co/{args.model_id}")
+        return 1
+
     model.to(device)
     model.eval()
 
-    tokenizer = XLNetTokenizerFast.from_pretrained(checkpoint_path)
-    print(f"Model loaded: {model.mem_token_count} memory tokens")
+    # Load model config (for dataset processing parameters)
+    try:
+        from huggingface_hub import hf_hub_download
 
-    # Load config
-    config_path = os.path.join(checkpoint_path, "training_config.json")
-    with open(config_path) as f:
-        config_data = json.load(f)
+        config_path = hf_hub_download(
+            repo_id=args.model_id,
+            filename="training_config.json",
+            revision=args.revision,
+            token=hf_token,
+        )
+        with open(config_path) as f:
+            config_data = json.load(f)
+        print("✅ Training config loaded")
+    except Exception as e:
+        print(f"⚠️  Could not load training config: {e}")
+        print("   Using default parameters...")
+        config_data = {
+            "max_seq_length": 384,
+            "doc_stride": 64,
+            "max_n_segs": None,
+        }
 
-    # Create evaluation dataset using chunked data (FAST!)
-    eval_type = "full dataset" if test_size is None else f"{test_size} examples"
-    print(f"Creating evaluation dataset ({eval_type})...")
-
-    # Check if chunked dataset exists
+    # Create evaluation dataset
+    print(f"\n📊 Creating evaluation dataset ({eval_type})...")
     chunked_dir = "./preprocessed_data/squad_v2"
     use_chunked = os.path.exists(chunked_dir)
 
     if use_chunked:
         print(f"✅ Using preprocessed chunked dataset from {chunked_dir}")
-        # Load from chunked dataset (FAST: 2-5 seconds!)
         eval_dataset = load_chunked_dataset(
             dataset_dir=chunked_dir,
             split="validation",
-            mode="first_n" if test_size else "streaming",
-            num_examples=test_size,
+            mode="first_n" if args.test_size else "streaming",
+            num_examples=args.test_size,
             max_n_segs=config_data.get("max_n_segs", None),
         )
     else:
-        print("⚠️  Chunked dataset not found, using old pipeline (slow)")
+        print("⚠️  Chunked dataset not found, using standard pipeline")
         from memxlnet.data.dataset import create_evaluation_dataloader
 
         eval_dataset, eval_dataloader = create_evaluation_dataloader(
@@ -301,13 +475,11 @@ def main():
             max_seq_length=config_data.get("max_seq_length", 384),
             doc_stride=config_data.get("doc_stride", 64),
             batch_size=8,
-            max_examples=test_size,
+            max_examples=args.test_size,
             max_n_segs=config_data.get("max_n_segs", None),
             cache_dir=".cache",
             use_time_step_major=True,
         )
-        print(f"Dataset: {len(eval_dataset)} features, {len(eval_dataloader)} batches")
-        # Skip dataloader creation below since it's already created
         use_chunked = False
 
     # Create dataloader (only if using chunked dataset)
@@ -316,31 +488,33 @@ def main():
             eval_dataset,
             batch_size=8,
             shuffle=False,
-            num_workers=0,  # ChunkedDataset doesn't work well with multiprocessing
+            num_workers=0,
             use_time_step_major=True,
         )
-        print(f"Dataset: {len(eval_dataset)} features, {len(eval_dataloader)} batches")
+
+    print(f"Dataset: {len(eval_dataset)} features, {len(eval_dataloader)} batches")
 
     # Load ground truth
     squad_dataset = load_dataset("squad_v2", split="validation")
-    if test_size is not None:
-        test_examples = squad_dataset.select(range(test_size))
-        num_examples = test_size
+    if args.test_size is not None:
+        test_examples = squad_dataset.select(range(args.test_size))
+        num_examples = args.test_size
     else:
         test_examples = squad_dataset
         num_examples = len(squad_dataset)
 
-    print("Running evaluation with FIXED CLS positions...")
+    # Run evaluation
+    print("\n🔍 Running evaluation with FIXED CLS positions...")
     raw_predictions = evaluate_with_fixed_cls(
         model=model,
         eval_dataloader=eval_dataloader,
         tokenizer=tokenizer,
         device=device,
-        no_answer_threshold=1.5,
-        max_answer_length=30,
+        no_answer_threshold=args.no_answer_threshold,
+        max_answer_length=args.max_answer_length,
     )
 
-    print(f"Collected {len(raw_predictions)} segment-level predictions")
+    print(f"✅ Collected {len(raw_predictions)} segment-level predictions")
 
     # Aggregate predictions
     final_predictions = aggregate_predictions(raw_predictions, num_examples)
@@ -348,38 +522,41 @@ def main():
     # Compute metrics
     metrics = compute_metrics(final_predictions, test_examples)
 
-    print("\n🎯 EVALUATION RESULTS WITH CLS POSITION FIX:")
-    print("=" * 60)
+    # Print results
+    print("\n" + "=" * 80)
+    print("🎯 EVALUATION RESULTS WITH CLS POSITION FIX")
+    print("=" * 80)
     print(f"F1 Score:              {metrics['f1']:.2f}%")
     print(f"Exact Match:           {metrics['exact_match']:.2f}%")
     print(f"Has Answer F1:         {metrics['has_answer_f1']:.2f}%")
     print(f"Has Answer Exact:      {metrics['has_answer_exact']:.2f}%")
     print(f"No Answer F1:          {metrics['no_answer_f1']:.2f}%")
     print(f"No Answer Exact:       {metrics['no_answer_exact']:.2f}%")
-    print("=" * 60)
+    print("=" * 80)
 
-    # Check CLS index usage
+    # CLS index analysis
     cls_indices_used = [p["cls_index_used"] for p in raw_predictions]
     unique_cls = set(cls_indices_used)
-    print(f"\nCLS indices used: {unique_cls}")
-    print("Expected CLS position: 383 (end of sequence)")
+    print("\n📍 CLS Position Analysis:")
+    print(f"   • CLS indices used: {sorted(unique_cls)}")
+    print("   • Expected CLS position: 383 (end of sequence)")
 
-    # Analyze no-answer predictions
+    # No-answer analysis
     no_answer_predictions = sum(1 for p in raw_predictions if p["predicted_empty"])
-    print(
-        f"No-answer predictions: {no_answer_predictions}/{len(raw_predictions)} ({no_answer_predictions / len(raw_predictions) * 100:.1f}%)"
-    )
+    no_answer_rate = no_answer_predictions / len(raw_predictions) * 100
+    print("\n❓ No-Answer Predictions:")
+    print(f"   • Count: {no_answer_predictions}/{len(raw_predictions)} ({no_answer_rate:.1f}%)")
 
-    # Compare with previous results
-    print("\n📊 COMPARISON WITH PREVIOUS RESULTS:")
-    print("Previous (buggy):  F1=35.52%, EM=28.00%, NoAns=0.00%")
+    # Performance comparison
+    print("\n📊 Performance Comparison:")
+    print("   • Previous (buggy):  F1=35.52%, EM=28.00%, NoAns=0.00%")
     print(
-        f"Current (fixed):   F1={metrics['f1']:.2f}%, EM={metrics['exact_match']:.2f}%, NoAns={metrics['no_answer_f1']:.2f}%"
+        f"   • Current (fixed):   F1={metrics['f1']:.2f}%, EM={metrics['exact_match']:.2f}%, NoAns={metrics['no_answer_f1']:.2f}%"
     )
 
     improvement_f1 = metrics["f1"] - 35.52
     improvement_em = metrics["exact_match"] - 28.00
-    print(f"Improvement:       F1={improvement_f1:+.2f}%, EM={improvement_em:+.2f}%")
+    print(f"   • Improvement:       F1={improvement_f1:+.2f}%, EM={improvement_em:+.2f}%")
 
     if metrics["f1"] >= 80.0:
         print(f"\n✅ SUCCESS: F1 {metrics['f1']:.2f}% >= 80% target achieved!")
@@ -387,28 +564,37 @@ def main():
         print(f"\n📈 Progress: F1 {metrics['f1']:.2f}% (target: 80%)")
 
     # Save results
+    os.makedirs(args.output_dir, exist_ok=True)
+
     results = {
-        "checkpoint_path": checkpoint_path,
-        "test_size": test_size,
+        "model_id": args.model_id,
+        "revision": args.revision,
+        "test_size": args.test_size,
         "num_examples_evaluated": num_examples,
-        "evaluation_type": "full_dataset" if test_size is None else "subset",
+        "evaluation_type": "full_dataset" if args.test_size is None else "subset",
         "metrics": metrics,
         "cls_fix_applied": True,
-        "cls_indices_used": list(unique_cls),
-        "no_answer_prediction_rate": no_answer_predictions / len(raw_predictions) * 100,
+        "cls_indices_used": sorted(unique_cls),
+        "no_answer_prediction_rate": no_answer_rate,
         "total_segment_predictions": len(raw_predictions),
-        "expected_performance": "F1=77-80% for 100 examples, may vary for full dataset",
+        "parameters": {
+            "no_answer_threshold": args.no_answer_threshold,
+            "max_answer_length": args.max_answer_length,
+        },
     }
 
     # Use different filename for full vs subset evaluation
-    results_filename = (
-        "results/fixed_evaluation_results_FULL.json" if test_size is None else "results/fixed_evaluation_results.json"
-    )
-    with open(results_filename, "w") as f:
+    results_filename = "evaluation_results_FULL.json" if args.test_size is None else "evaluation_results_subset.json"
+    results_path = os.path.join(args.output_dir, results_filename)
+
+    with open(results_path, "w") as f:
         json.dump(results, f, indent=2)
 
-    print(f"\n💾 Results saved to: {results_filename}")
+    print(f"\n💾 Results saved to: {results_path}")
+    print("=" * 80)
+
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
