@@ -10,13 +10,13 @@ This directory contains comprehensive documentation for the Memory-Augmented XLN
 ### 📖 API Reference (`api/`)
 Complete API documentation for all public interfaces:
 - **[API Reference](api/API_REFERENCE.md)** - Core API documentation ✅ **Verified**
-- **[Enhanced MA-XLNet API Reference](api/ENHANCED_MA_XLNET_API_REFERENCE.md)** - Enhanced memory features API 🚧 **Planned Features**
+- **[Enhanced MA-XLNet API Reference](api/ENHANCED_MA_XLNET_API_REFERENCE.md)** - Enhanced memory features API ✅ **Phase 1 & 2 Complete**
 - **[MemXLNet QA](api/memxlnet_qa.md)** - Original memory-augmented model documentation
 
 ### 📘 User Guides (`guides/`)
 Step-by-step guides for users and developers:
-- **[Enhanced MA-XLNet Usage Guide](guides/ENHANCED_MA_XLNET_USAGE_GUIDE.md)** - Comprehensive usage guide 🚧 **Contains Planned Features**
-- **[Enhanced MA-XLNet Quick Reference](guides/ENHANCED_MA_XLNET_QUICK_REFERENCE.md)** - Developer cheat sheet
+- **[Enhanced MA-XLNet Usage Guide](guides/ENHANCED_MA_XLNET_USAGE_GUIDE.md)** - Comprehensive usage guide ✅ **Phase 1 & 2 Complete**
+- **[Enhanced MA-XLNet Quick Reference](guides/ENHANCED_MA_XLNET_QUICK_REFERENCE.md)** - Developer cheat sheet ✅ **Updated**
 - **[Memory Tokens Guide](guides/MEMORY_TOKENS_GUIDE.md)** - Complete guide to memory token systems ✅ **Verified**
 - **[Streaming Guide](guides/STREAMING_GUIDE.md)** - Memory-efficient data processing ✅ **New**
 - **[Usage Examples](guides/USAGE_EXAMPLES.md)** - Practical examples and patterns
@@ -74,10 +74,10 @@ In-depth technical documentation:
 - ✅ **Multi-Head Attention** - Parallel memory operations (1-8 heads)
 - ✅ **Usage Tracking** - Memory slot usage optimization
 - ✅ **Temporal Links** - Relationship tracking between memory slots
+- ✅ **Memory Visualization** - Attention heatmaps and usage patterns (MemoryVisualizer)
+- ✅ **Multi-Hop Reasoning** - Hop tracking and bridge entity detection (HopTracker)
 
 ### Planned Features (See PLANNED_FEATURES.md)
-- 🚧 **Memory Visualization** - Attention heatmaps and usage patterns
-- 🚧 **Multi-Hop Reasoning** - Hop tracking and bridge entity detection
 - 🚧 **Advanced Memory Features** - Adaptive allocation, compression, persistence
 
 ## 📊 Memory System Comparison
@@ -195,6 +195,6 @@ For questions about:
 ---
 
 **Last Updated:** January 15, 2025
-**Documentation Version:** 3.1
+**Documentation Version:** 3.2
 **Core Features Status:** ✅ Production Ready
-**Enhanced Features Status:** 🚧 Planned - See [PLANNED_FEATURES.md](PLANNED_FEATURES.md)
+**Enhanced Features Status:** ✅ Phase 1 & 2 Complete - See [PLANNED_FEATURES.md](PLANNED_FEATURES.md)

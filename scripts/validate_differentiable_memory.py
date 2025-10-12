@@ -31,7 +31,9 @@ import logging
 from pathlib import Path
 
 import torch
+from transformers import XLNetTokenizerFast
 
+from memxlnet.models import MemXLNetForQA
 from memxlnet.training import TrainingConfig, XLNetRecurrentTrainer
 
 # Set up logging
@@ -82,7 +84,7 @@ def create_validation_config():
 
         # ===== Training Schedule =====
         gradient_accumulation_steps=1,
-        eval_steps=50,                # Eval more frequently (every ~50 steps)
+        eval_steps=5000,                # Eval more frequently (every ~50 steps)
         save_steps=100,               # Save after each epoch (~250 steps total / 6 epochs = ~42 steps/epoch)
         logging_steps=25,             # Log more frequently
 
@@ -141,7 +143,7 @@ def print_config_summary(config):
 
     print("🧠 MODEL:")
     print(f"   • Base: {config.model_name}")
-    print(f"   • Memory type: Differentiable")
+    print("   • Memory type: Differentiable")
     print(f"   • Memory tokens: {config.memory_num_tokens}")
     print(f"   • Memory heads: {config.num_memory_heads}")
     print(f"   • Memory slots: {config.memory_slots}")
@@ -190,9 +192,6 @@ def validate_checkpoint(checkpoint_path):
     Returns:
         bool: True if validation passes, False otherwise
     """
-    from memxlnet.models import MemXLNetForQA
-    from transformers import XLNetTokenizerFast
-
     logger.info("Validating checkpoint loading...")
 
     try:
