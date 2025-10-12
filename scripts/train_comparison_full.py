@@ -41,16 +41,12 @@ import logging
 import time
 from pathlib import Path
 
-import numpy as np
 import torch
 
 from memxlnet.training import TrainingConfig, XLNetRecurrentTrainer
 
 # Set up logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 
@@ -60,20 +56,12 @@ def parse_args():
         description="Full training comparison between token-based and differentiable memory"
     )
     parser.add_argument(
-        "--skip-token-training",
-        action="store_true",
-        help="Skip token-based model training (use existing checkpoint)"
+        "--skip-token-training", action="store_true", help="Skip token-based model training (use existing checkpoint)"
     )
     parser.add_argument(
-        "--skip-diff-training",
-        action="store_true",
-        help="Skip differentiable model training (use existing checkpoint)"
+        "--skip-diff-training", action="store_true", help="Skip differentiable model training (use existing checkpoint)"
     )
-    parser.add_argument(
-        "--only-analysis",
-        action="store_true",
-        help="Only run analysis (skip all training)"
-    )
+    parser.add_argument("--only-analysis", action="store_true", help="Only run analysis (skip all training)")
     return parser.parse_args()
 
 
@@ -91,51 +79,42 @@ def create_token_based_config():
         model_name="xlnet-base-cased",
         max_seq_length=384,
         doc_stride=64,
-
         # ===== Dataset Configuration (FULL SQuAD v2) =====
         dataset_name="squad_v2",
         train_split="train",
         eval_split="validation",
         cache_dir="./.cache",
-        max_train_samples=None,      # Use full training set (~130K)
-        max_eval_samples=None,       # Use full validation set (~12K)
+        max_train_samples=None,  # Use full training set (~130K)
+        max_eval_samples=None,  # Use full validation set (~12K)
         use_lazy_loading=False,
-
         # ===== Progressive Training =====
         progressive_segments=[2, 4, 6],  # Progressive curriculum
         max_n_segs=None,
-
         # ===== Training Hyperparameters =====
         num_epochs=4,
         train_batch_size=8,
-        eval_batch_size=8,            # Must match train_batch_size (XLNet memory cache requirement)
+        eval_batch_size=8,  # Must match train_batch_size (XLNet memory cache requirement)
         learning_rate=3e-5,
         weight_decay=0.01,
         warmup_ratio=0.1,
         max_grad_norm=1.0,
-
         # ===== Training Schedule =====
         gradient_accumulation_steps=2,  # Effective batch size: 16
         eval_steps=6000,
         save_steps=10000,
         logging_steps=500,
-
         # ===== Output Configuration =====
         output_dir="./outputs/comparison-token-based",
         run_name="comparison-token-based",
         save_total_limit=3,
-
         # ===== Evaluation Settings =====
         no_answer_threshold=1.5,
         use_any_positive_logic=True,
-
         # ===== Experiment Tracking =====
         use_wandb=False,
-
         # ===== Device Settings =====
         device=device,
         fp16=has_cuda,
-
         # ===== Token-Based Memory Configuration =====
         memory_num_tokens=16,
         memory_update="gated",
@@ -143,12 +122,10 @@ def create_token_based_config():
         memory_impl="token",
         use_global_softmax=True,
         use_differentiable_memory=False,  # KEY: Traditional token-based
-
         # ===== Warmup Strategy =====
         warmup_freeze_base_epochs=0,
         warmup_disable_global_softmax_epochs=1,
         warmup_disable_any_positive_epochs=0,
-
         # ===== Hub Integration (Disabled) =====
         push_to_hub_on_save=False,
     )
@@ -170,70 +147,57 @@ def create_differentiable_config():
         model_name="xlnet-base-cased",
         max_seq_length=384,
         doc_stride=64,
-
         # ===== Dataset Configuration (FULL SQuAD v2) =====
         dataset_name="squad_v2",
         train_split="train",
         eval_split="validation",
         cache_dir="./.cache",
-        max_train_samples=None,      # Use full training set (~130K)
-        max_eval_samples=None,       # Use full validation set (~12K)
+        max_train_samples=None,  # Use full training set (~130K)
+        max_eval_samples=None,  # Use full validation set (~12K)
         use_lazy_loading=False,
-
         # ===== Progressive Training =====
         progressive_segments=[2, 4, 6],  # Same as token-based
         max_n_segs=None,
-
         # ===== Training Hyperparameters (IDENTICAL to token-based) =====
         num_epochs=4,
         train_batch_size=8,
-        eval_batch_size=8,            # Must match train_batch_size (XLNet memory cache requirement)
+        eval_batch_size=8,  # Must match train_batch_size (XLNet memory cache requirement)
         learning_rate=3e-5,
         weight_decay=0.01,
         warmup_ratio=0.1,
         max_grad_norm=1.0,
-
         # ===== Training Schedule (IDENTICAL to token-based) =====
         gradient_accumulation_steps=2,
         eval_steps=6000,
         save_steps=10000,
         logging_steps=500,
-
         # ===== Output Configuration =====
         output_dir="./outputs/comparison-differentiable",
         run_name="comparison-differentiable",
         save_total_limit=3,
-
         # ===== Evaluation Settings (IDENTICAL to token-based) =====
         no_answer_threshold=1.5,
         use_any_positive_logic=True,
-
         # ===== Experiment Tracking =====
         use_wandb=False,
-
         # ===== Device Settings =====
         device=device,
         fp16=has_cuda,
-
         # ===== Differentiable Memory Configuration =====
-        memory_num_tokens=16,        # Same token count for fair comparison
+        memory_num_tokens=16,  # Same token count for fair comparison
         memory_impl="differentiable",  # KEY: Use differentiable memory
         use_differentiable_memory=True,
-
         # Differentiable memory parameters
-        num_memory_heads=4,          # Multi-head attention
-        memory_slots=32,             # Number of memory slots
-        memory_sharpness=2.0,        # Attention sharpening
+        num_memory_heads=4,  # Multi-head attention
+        memory_slots=32,  # Number of memory slots
+        memory_sharpness=2.0,  # Attention sharpening
         enable_usage_tracking=True,  # Track memory usage
         enable_temporal_links=True,  # Track temporal relationships
-
         use_global_softmax=True,
-
         # ===== Warmup Strategy (IDENTICAL to token-based) =====
         warmup_freeze_base_epochs=0,
         warmup_disable_global_softmax_epochs=1,
         warmup_disable_any_positive_epochs=0,
-
         # ===== Hub Integration (Disabled) =====
         push_to_hub_on_save=False,
     )
@@ -251,7 +215,7 @@ def print_training_info(config, model_type):
     print()
 
     print("📊 DATASET:")
-    print(f"   • Full SQuAD v2 (~130K train, ~12K eval)")
+    print("   • Full SQuAD v2 (~130K train, ~12K eval)")
     print()
 
     print("🧠 MODEL:")
@@ -274,7 +238,9 @@ def print_training_info(config, model_type):
 
     print("⚡ TRAINING:")
     print(f"   • Epochs: {config.num_epochs}")
-    print(f"   • Batch size: {config.train_batch_size} (effective: {config.train_batch_size * config.gradient_accumulation_steps})")
+    print(
+        f"   • Batch size: {config.train_batch_size} (effective: {config.train_batch_size * config.gradient_accumulation_steps})"
+    )
     print(f"   • Learning rate: {config.learning_rate}")
     print(f"   • Device: {config.device}")
     print()
@@ -285,10 +251,10 @@ def print_training_info(config, model_type):
 
     approx_steps_per_epoch = 130000 // (config.train_batch_size * config.gradient_accumulation_steps)
     approx_total_steps = approx_steps_per_epoch * config.num_epochs
-    print(f"⏱️  ESTIMATED TIME:")
+    print("⏱️  ESTIMATED TIME:")
     print(f"   • Steps per epoch: ~{approx_steps_per_epoch:,}")
     print(f"   • Total steps: ~{approx_total_steps:,}")
-    print(f"   • Expected runtime: ~8-12 hours (GPU)")
+    print("   • Expected runtime: ~8-12 hours (GPU)")
     print()
     print("=" * 80)
 
@@ -318,7 +284,7 @@ def train_model(config, model_type):
 
         # Get best metrics
         best_metrics = {}
-        if hasattr(trainer, 'best_metrics'):
+        if hasattr(trainer, "best_metrics"):
             best_metrics = trainer.best_metrics
 
         print(f"\n🎉 {model_type.title()} training completed!")
@@ -346,8 +312,8 @@ def run_comparison_analysis(token_model_path, diff_model_path, output_dir):
         diff_model_path: Path to differentiable model checkpoint
         output_dir: Directory to save analysis results
     """
+
     from memxlnet.models import MemXLNetForQA
-    from transformers import XLNetTokenizerFast
 
     print("\n" + "=" * 80)
     print("📊 COMPARISON ANALYSIS")
@@ -365,7 +331,7 @@ def run_comparison_analysis(token_model_path, diff_model_path, output_dir):
         token_model = MemXLNetForQA.from_pretrained(token_model_path)
         token_model.to(device)
         token_model.eval()
-        print(f"✓ Token-based model loaded")
+        print("✓ Token-based model loaded")
     except Exception as e:
         print(f"✗ Failed to load token-based model: {e}")
         token_model = None
@@ -374,7 +340,7 @@ def run_comparison_analysis(token_model_path, diff_model_path, output_dir):
         diff_model = MemXLNetForQA.from_pretrained(diff_model_path)
         diff_model.to(device)
         diff_model.eval()
-        print(f"✓ Differentiable model loaded")
+        print("✓ Differentiable model loaded")
     except Exception as e:
         print(f"✗ Failed to load differentiable model: {e}")
         diff_model = None
@@ -586,11 +552,7 @@ def main():
     token_model_path = results["token_based"]["output_dir"] + "/best_model"
     diff_model_path = results["differentiable"]["output_dir"] + "/best_model"
 
-    run_comparison_analysis(
-        token_model_path,
-        diff_model_path,
-        "./outputs/comparison-analysis"
-    )
+    run_comparison_analysis(token_model_path, diff_model_path, "./outputs/comparison-analysis")
 
     # Final summary
     print("\n" + "=" * 80)
@@ -601,14 +563,11 @@ def main():
     print("📁 Output Directories:")
     print(f"  • Token-based model: {results['token_based']['output_dir']}")
     print(f"  • Differentiable model: {results['differentiable']['output_dir']}")
-    print(f"  • Comparison analysis: ./outputs/comparison-analysis")
+    print("  • Comparison analysis: ./outputs/comparison-analysis")
     print()
 
     if not args.skip_token_training and not args.skip_diff_training:
-        total_time = (
-            results["token_based"].get("training_time", 0) +
-            results["differentiable"].get("training_time", 0)
-        )
+        total_time = results["token_based"].get("training_time", 0) + results["differentiable"].get("training_time", 0)
         print(f"⏱️  Total training time: {total_time / 3600:.2f} hours")
         print()
 

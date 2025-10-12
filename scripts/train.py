@@ -5,7 +5,6 @@ This script provides a command-line interface for training MA-XLNet models
 with memory-augmented question answering capabilities.
 """
 
-import sys
 from memxlnet.training import TrainingConfig, XLNetRecurrentTrainer
 
 

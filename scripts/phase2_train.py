@@ -7,7 +7,9 @@ per document to establish short-range recurrence (e.g., 3 → 6 segments).
 """
 
 import logging
+
 import torch
+
 from memxlnet.training import TrainingConfig, XLNetRecurrentTrainer
 
 # Set up logging
@@ -27,73 +29,60 @@ def create_phase2_config():
     config = TrainingConfig(
         # Start from Phase 1 best model (adjust path if different in your runs)
         model_name="xlnet-base-cased",
-
         # Sequence settings
         max_seq_length=384,
         doc_stride=64,
-
         # Dataset (full SQuAD v2 long)
         dataset_name="squad_v2",
         train_split="train",
         eval_split="validation",
         cache_dir="./.cache",
-        max_train_samples=None,   # Full train
-        max_eval_samples=None,    # Full eval
+        max_train_samples=None,  # Full train
+        max_eval_samples=None,  # Full eval
         use_lazy_loading=False,
-
         # Train with longer context to actually learn memory usage
         progressive_segments=[2],
         max_n_segs=None,
-
         # Streaming/data
         streaming_chunk_size=3000,
         max_memory_gb=64.0,
         use_streaming=False,
-
         # Training hyperparameters
         num_epochs=4,
-        train_batch_size=16,       # reduce to allow longer context / overlap
+        train_batch_size=16,  # reduce to allow longer context / overlap
         eval_batch_size=32,
         learning_rate=3e-5,
         weight_decay=0.01,
         warmup_ratio=0.1,
         max_grad_norm=1.0,
-
         # Performance & cadence
         gradient_accumulation_steps=1,
         eval_steps=6_000,
         save_steps=10_000,
         logging_steps=500,
-
         # Output
         output_dir="./outputs/xlnet-squad-phase2-1",
         run_name="xlnet-squad-phase2-1-gated",
         save_total_limit=5,
-
         # Evaluation
         no_answer_threshold=1.5,
         use_any_positive_logic=True,
-
         # Experiment tracking
         use_wandb=False,
         wandb_project="xlnet-long-squad-phase2",
-
         # Device
         device=device,
         fp16=has_cuda,
-
         # MemXLNet-QA flags (Phase 2: enable gated memory + global span)
-        memory_num_tokens=8,       # start smaller to reduce early noise
+        memory_num_tokens=8,  # start smaller to reduce early noise
         memory_update="gated",
         memory_init="learned",
         memory_impl="token",
         use_global_softmax=True,
-
         # Warmup behavior: train base together; defer global softmax for 1 epoch
         warmup_freeze_base_epochs=0,
         warmup_disable_global_softmax_epochs=1,
         warmup_disable_any_positive_epochs=0,
-
         # HuggingFace Hub integration (optional)
         hub_model_id="anhtu12st/memxlnet-squad",  # Set to your Hub repository ID
         push_to_hub_on_save=True,  # Enable automatic push to Hub
@@ -128,7 +117,9 @@ def print_training_info(config):
     print(f"   • Init model: {config.model_name}")
     print(f"   • Seq len: {config.max_seq_length} | Doc stride: {config.doc_stride}")
     print(f"   • Progressive segments: {config.progressive_segments}")
-    print(f"   • Memory: tokens={config.memory_num_tokens}, update={config.memory_update}, global_softmax={config.use_global_softmax}")
+    print(
+        f"   • Memory: tokens={config.memory_num_tokens}, update={config.memory_update}, global_softmax={config.use_global_softmax}"
+    )
     print()
 
     print("⚡ PERFORMANCE:")
@@ -141,7 +132,9 @@ def print_training_info(config):
     print("📈 SCHEDULE:")
     print(f"   • Steps/epoch: ~{steps_per_epoch:,}")
     print(f"   • Total steps: ~{total_steps:,}")
-    print(f"   • Eval every: {config.eval_steps:,} steps | Save every: {config.save_steps:,} steps | Log every: {config.logging_steps:,} steps")
+    print(
+        f"   • Eval every: {config.eval_steps:,} steps | Save every: {config.save_steps:,} steps | Log every: {config.logging_steps:,} steps"
+    )
     print()
 
     print("💾 OUTPUT:")

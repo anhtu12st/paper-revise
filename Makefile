@@ -8,11 +8,11 @@ test:
 
 lint:
 	@echo "Running ruff..."
-	uv run ruff check --fix src/ tests/ examples/
+	uv run ruff check --fix src/ tests/ examples/ scripts/
 	@echo "Running mypy..."
 	uv run mypy src/
 	@echo "Running formatter..."
-	uv run ruff format src/ tests/ examples/
+	uv run ruff format src/ tests/ examples/ scripts/
 	@echo "Linting complete!"
 
 clean:

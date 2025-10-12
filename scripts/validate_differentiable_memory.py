@@ -37,10 +37,7 @@ from memxlnet.models import MemXLNetForQA
 from memxlnet.training import TrainingConfig, XLNetRecurrentTrainer
 
 # Set up logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 
@@ -59,68 +56,56 @@ def create_validation_config():
         model_name="xlnet-base-cased",
         max_seq_length=384,
         doc_stride=64,
-
         # ===== Dataset Configuration (SMALL for quick validation) =====
         dataset_name="squad_v2",
         train_split="train",
         eval_split="validation",
         cache_dir="./.cache_1",
-        max_train_samples=1000,      # Increased for better learning
-        max_eval_samples=200,        # Increased for better metrics
+        max_train_samples=1000,  # Increased for better learning
+        max_eval_samples=200,  # Increased for better metrics
         use_lazy_loading=False,
-
         # ===== Progressive Training (Minimal) =====
-        progressive_segments=[2],     # Just 2 segments per document
+        progressive_segments=[2],  # Just 2 segments per document
         max_n_segs=None,
-
         # ===== Training Hyperparameters (Fast settings) =====
-        num_epochs=6,                 # Increased for better convergence
-        train_batch_size=4,           # Small batch for speed
-        eval_batch_size=4,            # Must match train_batch_size (XLNet memory cache requirement)
+        num_epochs=6,  # Increased for better convergence
+        train_batch_size=4,  # Small batch for speed
+        eval_batch_size=4,  # Must match train_batch_size (XLNet memory cache requirement)
         learning_rate=3e-5,
         weight_decay=0.01,
         warmup_ratio=0.1,
         max_grad_norm=1.0,
-
         # ===== Training Schedule =====
         gradient_accumulation_steps=1,
-        eval_steps=5000,                # Eval more frequently (every ~50 steps)
-        save_steps=100,               # Save after each epoch (~250 steps total / 6 epochs = ~42 steps/epoch)
-        logging_steps=25,             # Log more frequently
-
+        eval_steps=5000,  # Eval more frequently (every ~50 steps)
+        save_steps=100,  # Save after each epoch (~250 steps total / 6 epochs = ~42 steps/epoch)
+        logging_steps=25,  # Log more frequently
         # ===== Output Configuration =====
         output_dir="./outputs/validation-diff-memory",
         run_name="validation-diff-memory",
-        save_total_limit=2,           # Keep only 2 checkpoints
-
+        save_total_limit=2,  # Keep only 2 checkpoints
         # ===== Evaluation Settings =====
         no_answer_threshold=1.5,
         use_any_positive_logic=True,
-
         # ===== Experiment Tracking =====
-        use_wandb=False,              # No W&B for validation
-
+        use_wandb=False,  # No W&B for validation
         # ===== Device Settings =====
         device=device,
         fp16=has_cuda,
-
         # ===== Differentiable Memory Configuration (Conservative) =====
-        memory_num_tokens=8,          # Small memory for speed
-        memory_impl="differentiable", # KEY: Use differentiable memory!
+        memory_num_tokens=8,  # Small memory for speed
+        memory_impl="differentiable",  # KEY: Use differentiable memory!
         use_differentiable_memory=True,
-
         # Differentiable memory parameters
-        num_memory_heads=2,           # 2 heads (conservative)
-        memory_slots=16,              # 16 slots
-        memory_sharpness=1.5,         # Moderate sharpening
-        enable_usage_tracking=True,   # Track memory usage
-        enable_temporal_links=True,   # Track temporal relationships
-
+        num_memory_heads=2,  # 2 heads (conservative)
+        memory_slots=16,  # 16 slots
+        memory_sharpness=1.5,  # Moderate sharpening
+        enable_usage_tracking=True,  # Track memory usage
+        enable_temporal_links=True,  # Track temporal relationships
         # ===== Warmup Strategy =====
         warmup_freeze_base_epochs=0,
         warmup_disable_global_softmax_epochs=0,  # Enable immediately for faster learning
         warmup_disable_any_positive_epochs=0,
-
         # ===== Hub Integration (Disabled for validation) =====
         push_to_hub_on_save=False,
     )
@@ -253,7 +238,7 @@ def analyze_memory_usage(output_dir):
             "gradient_flow": "passed",
             "memory_propagation": "passed",
             "checkpoint_loading": "passed",
-        }
+        },
     }
 
     # Save analysis
@@ -299,7 +284,7 @@ def save_validation_results(output_dir, config, metrics, checkpoint_valid):
             "f1_threshold": 15.0,  # More realistic threshold for validation with limited training
             "f1_achieved": metrics.get("f1", 0.0) if metrics else 0.0,
             "passed": checkpoint_valid and (metrics.get("f1", 0.0) >= 15.0 if metrics else False),
-        }
+        },
     }
 
     results_path = Path(output_dir) / "validation_results.json"
@@ -342,13 +327,15 @@ def print_final_summary(results):
     print("🎯 Success Criteria:")
     print(f"   • Training completed: {'✓' if criteria['training_completed'] else '✗'}")
     print(f"   • Checkpoint loads: {'✓' if criteria['checkpoint_loads'] else '✗'}")
-    print(f"   • F1 >= {criteria['f1_threshold']}%: {'✓' if criteria['f1_achieved'] >= criteria['f1_threshold'] else '✗'} ({criteria['f1_achieved']:.2f}%)")
+    print(
+        f"   • F1 >= {criteria['f1_threshold']}%: {'✓' if criteria['f1_achieved'] >= criteria['f1_threshold'] else '✗'} ({criteria['f1_achieved']:.2f}%)"
+    )
     print(f"   • Overall: {'✅ PASSED' if criteria['passed'] else '❌ FAILED'}")
     print()
 
     print("=" * 80)
 
-    if criteria['passed']:
+    if criteria["passed"]:
         print("\n🎉 Differentiable memory validation PASSED!")
         print("✓ Ready to proceed with Phase 2 implementation and full training.")
     else:
@@ -390,9 +377,11 @@ def main():
         metrics = {}
 
         # Try to load metrics from trainer if available
-        if hasattr(trainer, 'best_metrics'):
+        if hasattr(trainer, "best_metrics"):
             metrics = trainer.best_metrics
-            logger.info(f"📊 Loaded best metrics: F1={metrics.get('f1', 0):.2f}%, EM={metrics.get('exact_match', 0):.2f}%")
+            logger.info(
+                f"📊 Loaded best metrics: F1={metrics.get('f1', 0):.2f}%, EM={metrics.get('exact_match', 0):.2f}%"
+            )
 
         print("\n✅ Training completed!")
 
@@ -416,12 +405,7 @@ def main():
         analyze_memory_usage(config.output_dir)
 
         # Save validation results
-        results = save_validation_results(
-            config.output_dir,
-            config,
-            metrics,
-            checkpoint_valid
-        )
+        results = save_validation_results(config.output_dir, config, metrics, checkpoint_valid)
 
         # Print final summary
         print_final_summary(results)

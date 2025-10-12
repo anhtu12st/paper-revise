@@ -74,6 +74,7 @@ HUB_DATASET_ID = f"{HUB_USERNAME}/memxlnet-squad-mem{MEMORY_NUM_TOKENS}"
 # TRAINING CONFIGURATION - DEFAULT VALUES
 # ============================================================================
 
+
 def get_training_config():
     """Create production-ready training configuration."""
 
@@ -89,76 +90,63 @@ def get_training_config():
         model_name="xlnet-base-cased",
         max_seq_length=384,
         doc_stride=64,
-
         # ===== Dataset Configuration =====
         dataset_name="squad_v2",
         train_split="train",
         eval_split="validation",
         cache_dir="./.cache",
-        max_train_samples=None,      # Use full training set
-        max_eval_samples=None,       # Use full evaluation set
+        max_train_samples=None,  # Use full training set
+        max_eval_samples=None,  # Use full evaluation set
         use_lazy_loading=False,
-
         # ===== Progressive Training =====
-        progressive_segments=[2],    # Start with 2 segments
+        progressive_segments=[2],  # Start with 2 segments
         max_n_segs=None,
-
         # ===== Data Processing =====
         streaming_chunk_size=3000,
         max_memory_gb=64.0,
         use_streaming=False,
-
         # ===== Training Hyperparameters =====
         num_epochs=4,
-        train_batch_size=8,   # Reduced from 16 to fit in 15GB GPU (OOM fix)
-        eval_batch_size=16,   # Reduced from 32 for safety
+        train_batch_size=8,  # Reduced from 16 to fit in 15GB GPU (OOM fix)
+        eval_batch_size=16,  # Reduced from 32 for safety
         learning_rate=3e-5,
         weight_decay=0.01,
         warmup_ratio=0.1,
         max_grad_norm=1.0,
-
         # ===== Training Schedule =====
         gradient_accumulation_steps=2,  # Increased from 1 (maintains effective batch size of 16)
         eval_steps=6000,
         save_steps=10000,
         logging_steps=500,
-
         # ===== Output Configuration =====
         output_dir="./outputs/memxlnet-squad",
         run_name="memxlnet-squad-production",
         save_total_limit=5,
-
         # ===== Evaluation Settings =====
         no_answer_threshold=1.5,
         use_any_positive_logic=True,
-
         # ===== Experiment Tracking =====
         use_wandb=False,
         wandb_project="memxlnet-squad",
-
         # ===== Device Settings =====
         device=device,
         fp16=has_cuda,
-
         # ===== Memory-Augmented XLNet Settings =====
         memory_num_tokens=MEMORY_NUM_TOKENS,
         memory_update="gated",
         memory_init="learned",
         memory_impl="token",
         use_global_softmax=True,
-
         # ===== Warmup Strategy =====
         warmup_freeze_base_epochs=0,
         warmup_disable_global_softmax_epochs=1,
         warmup_disable_any_positive_epochs=0,
-
         # ===== HuggingFace Hub Integration - Model =====
         hub_model_id=HUB_MODEL_ID,
         push_to_hub_on_save=True,
         hub_private=True,  # 🔒 Private repository (change to False for public)
         hub_token=hf_token,
         hub_strategy="best_only",
-
         # ===== HuggingFace Hub Integration - Preprocessed Dataset =====
         hub_dataset_id=HUB_DATASET_ID,
         use_hub_dataset=True,  # Download preprocessed data from Hub (fast, low RAM)
@@ -228,10 +216,7 @@ def main():
     """Main training entry point."""
 
     # Set up logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    )
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
     # Create configuration
     print("🔧 Initializing training configuration...")
@@ -251,7 +236,7 @@ def main():
         print("   Hub uploads may fail without authentication.")
         print()
         response = input("Continue anyway? [y/N]: ")
-        if response.lower() not in ['y', 'yes']:
+        if response.lower() not in ["y", "yes"]:
             print("Aborted.")
             return 1
 

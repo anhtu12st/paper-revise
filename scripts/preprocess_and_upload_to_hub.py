@@ -58,8 +58,8 @@ HUB_USERNAME = "anhtu12st"  # Change this to your username!
 # Format: (memory_tokens, max_seq_length, doc_stride, max_n_segs, private)
 # 🔒 All datasets are PRIVATE by default. Change True to False for public repositories.
 CONFIGS = [
-    (0, 384, 64, None, True),   # No memory tokens (baseline) - PRIVATE
-    (8, 384, 64, None, True),   # 8 memory tokens (recommended) - PRIVATE
+    (0, 384, 64, None, True),  # No memory tokens (baseline) - PRIVATE
+    (8, 384, 64, None, True),  # 8 memory tokens (recommended) - PRIVATE
     (16, 384, 64, None, True),  # 16 memory tokens - PRIVATE
     (32, 384, 64, None, True),  # 32 memory tokens - PRIVATE
 ]
@@ -70,16 +70,13 @@ SPLITS = ["train", "validation"]
 
 # Optional: Limit samples for testing (set to None for full dataset)
 MAX_TRAIN_SAMPLES = None  # Set to e.g., 1000 for testing
-MAX_EVAL_SAMPLES = None   # Set to e.g., 500 for testing
+MAX_EVAL_SAMPLES = None  # Set to e.g., 500 for testing
 
 # ============================================================================
 # MAIN PREPROCESSING LOGIC - DO NOT MODIFY BELOW THIS LINE
 # ============================================================================
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 
@@ -95,7 +92,7 @@ def validate_config():
         logger.warning("⚠️  Warning: HF_TOKEN not found in environment!")
         logger.warning("   Set it with: export HF_TOKEN='your_token'")
         response = input("Continue anyway? [y/N]: ")
-        if response.lower() not in ['y', 'yes']:
+        if response.lower() not in ["y", "yes"]:
             return False
 
     return True
@@ -185,9 +182,9 @@ def main():
     # Check privacy settings
     all_private = all(private for _, _, _, _, private in CONFIGS)
     if all_private:
-        logger.info(f"   🔒 Privacy: All repositories will be PRIVATE")
+        logger.info("   🔒 Privacy: All repositories will be PRIVATE")
     else:
-        logger.info(f"   ⚠️  Privacy: Some repositories will be PUBLIC")
+        logger.info("   ⚠️  Privacy: Some repositories will be PUBLIC")
 
     if MAX_TRAIN_SAMPLES or MAX_EVAL_SAMPLES:
         logger.info(f"   ⚠️  LIMITED MODE: train={MAX_TRAIN_SAMPLES}, eval={MAX_EVAL_SAMPLES}")
@@ -195,7 +192,7 @@ def main():
 
     # Confirm before starting
     response = input("Start preprocessing? [y/N]: ")
-    if response.lower() not in ['y', 'yes']:
+    if response.lower() not in ["y", "yes"]:
         logger.info("Aborted.")
         return 1
 
@@ -232,7 +229,7 @@ def main():
 
     logger.info("\n💡 Usage in training:")
     logger.info("   config = TrainingConfig(")
-    logger.info(f"       hub_dataset_id=\"{create_hub_repo_name(8)}\",  # Example with 8 memory tokens")
+    logger.info(f'       hub_dataset_id="{create_hub_repo_name(8)}",  # Example with 8 memory tokens')
     logger.info("       use_hub_dataset=True,")
     logger.info("   )")
     logger.info("=" * 80 + "\n")
