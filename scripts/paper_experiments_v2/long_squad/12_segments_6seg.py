@@ -39,6 +39,10 @@ def create_config():
         max_train_samples=None,
         max_eval_samples=None,
         use_lazy_loading=False,
+        # Chunked dataset settings (FAST: 2-5 min vs 30-60 min preprocessing)
+        use_chunked_dataset=True,
+        chunked_dataset_dir="./preprocessed_data/huutuan_long_squad_v2",
+        chunked_load_mode="streaming",  # Memory-efficient streaming
         progressive_segments=[2, 4, 6],
         max_n_segs=6,
         memory_num_tokens=8,

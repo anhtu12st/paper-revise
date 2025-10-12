@@ -1,6 +1,6 @@
 import os
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 import torch
 from datasets import load_dataset
@@ -1340,11 +1340,20 @@ def create_dataloader(
           as TimeStepMajorDataLoader has its own internal batching mechanism
     """
 
-    if use_time_step_major and isinstance(dataset, (SquadLikeQADataset, LazySquadLikeQADataset)):
+    # Check if dataset supports TimeStepMajorDataLoader interface
+    # (has get_all_documents and get_document_segments methods)
+    supports_time_step_major = (
+        isinstance(dataset, (SquadLikeQADataset, LazySquadLikeQADataset))
+        or hasattr(dataset, "get_all_documents")
+        and hasattr(dataset, "get_document_segments")
+    )
+
+    if use_time_step_major and supports_time_step_major:
         # Return time-step-major dataloader for memory-enabled training
-        # Works with both eager-loaded and lazy-loaded datasets
+        # Works with SquadLikeQADataset, LazySquadLikeQADataset, and ChunkedDataset
+        # Type cast is safe here because supports_time_step_major verifies compatibility
         return TimeStepMajorDataLoader(
-            dataset=dataset,
+            dataset=cast(SquadLikeQADataset | LazySquadLikeQADataset, dataset),
             batch_size=batch_size,
             shuffle=shuffle,
             max_segments=None,  # Use all segments

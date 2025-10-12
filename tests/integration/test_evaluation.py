@@ -18,7 +18,7 @@ from datasets import load_dataset
 from tqdm.auto import tqdm
 from transformers import XLNetTokenizerFast
 
-from memxlnet.data.dataset import create_evaluation_dataloader
+from memxlnet.data import create_dataloader, load_chunked_dataset
 
 # Import components
 from memxlnet.models.memxlnet_qa import MemXLNetForQA
@@ -257,7 +257,7 @@ def main():
     # Configuration
     checkpoint_path = "outputs/xlnet-squad-phase2-1/stage_1_segs_1/best_model"
     device = torch.device("cpu")
-    test_size = 200  # Set to None for full dataset, or integer for subset (e.g., 100)
+    test_size = None  # Set to None for full dataset, or integer for subset (e.g., 100)
 
     print(f"Loading model from: {checkpoint_path}")
     model = MemXLNetForQA.from_pretrained(checkpoint_path)
@@ -272,23 +272,54 @@ def main():
     with open(config_path) as f:
         config_data = json.load(f)
 
-    # Create evaluation dataset
+    # Create evaluation dataset using chunked data (FAST!)
     eval_type = "full dataset" if test_size is None else f"{test_size} examples"
     print(f"Creating evaluation dataset ({eval_type})...")
-    eval_dataset, eval_dataloader = create_evaluation_dataloader(
-        dataset_name="squad_v2",
-        split="validation",
-        tokenizer=tokenizer,
-        max_seq_length=config_data.get("max_seq_length", 384),
-        doc_stride=config_data.get("doc_stride", 64),
-        batch_size=8,
-        max_examples=test_size,
-        max_n_segs=config_data.get("max_n_segs", None),
-        cache_dir=".cache",
-        use_time_step_major=True,
-    )
 
-    print(f"Dataset: {len(eval_dataset)} features, {len(eval_dataloader)} batches")
+    # Check if chunked dataset exists
+    chunked_dir = "./preprocessed_data/squad_v2"
+    use_chunked = os.path.exists(chunked_dir)
+
+    if use_chunked:
+        print(f"✅ Using preprocessed chunked dataset from {chunked_dir}")
+        # Load from chunked dataset (FAST: 2-5 seconds!)
+        eval_dataset = load_chunked_dataset(
+            dataset_dir=chunked_dir,
+            split="validation",
+            mode="first_n" if test_size else "streaming",
+            num_examples=test_size,
+            max_n_segs=config_data.get("max_n_segs", None),
+        )
+    else:
+        print("⚠️  Chunked dataset not found, using old pipeline (slow)")
+        from memxlnet.data.dataset import create_evaluation_dataloader
+
+        eval_dataset, eval_dataloader = create_evaluation_dataloader(
+            dataset_name="squad_v2",
+            split="validation",
+            tokenizer=tokenizer,
+            max_seq_length=config_data.get("max_seq_length", 384),
+            doc_stride=config_data.get("doc_stride", 64),
+            batch_size=8,
+            max_examples=test_size,
+            max_n_segs=config_data.get("max_n_segs", None),
+            cache_dir=".cache",
+            use_time_step_major=True,
+        )
+        print(f"Dataset: {len(eval_dataset)} features, {len(eval_dataloader)} batches")
+        # Skip dataloader creation below since it's already created
+        use_chunked = False
+
+    # Create dataloader (only if using chunked dataset)
+    if use_chunked:
+        eval_dataloader = create_dataloader(
+            eval_dataset,
+            batch_size=8,
+            shuffle=False,
+            num_workers=0,  # ChunkedDataset doesn't work well with multiprocessing
+            use_time_step_major=True,
+        )
+        print(f"Dataset: {len(eval_dataset)} features, {len(eval_dataloader)} batches")
 
     # Load ground truth
     squad_dataset = load_dataset("squad_v2", split="validation")

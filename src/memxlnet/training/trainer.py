@@ -25,7 +25,6 @@ except ImportError:
 from memxlnet.data.dataset import (
     TimeStepMajorDataLoader,
     configure_memory_tokens,
-    create_dataloader,
     create_dataset_from_cache,
     process_and_cache_dataset,
 )
@@ -251,6 +250,13 @@ class TrainingConfig:
     use_hub_dataset: bool = True  # Try loading preprocessed dataset from Hub first (faster, lower RAM)
     force_reprocess: bool = False  # Force reprocessing even if Hub/cache exists (for debugging)
 
+    # Chunked dataset settings (GitHub-friendly preprocessing)
+    use_chunked_dataset: bool = False  # Enable chunked dataset loading (faster startup, 2-5 min vs 30-60 min)
+    chunked_dataset_dir: str | None = None  # Directory with chunked data (e.g., "./preprocessed_data/squad_v2")
+    chunked_load_mode: str = "streaming"  # Loading mode: "streaming", "first_n", "chunks", "full"
+    chunked_num_examples: int | None = None  # Number of examples to load (for "first_n" mode)
+    chunked_chunk_indices: list[int] | None = None  # Specific chunks to load (for "chunks" mode)
+
     def __post_init__(self):
         """Post-initialization setup."""
         os.makedirs(self.output_dir, exist_ok=True)
@@ -456,6 +462,82 @@ class XLNetRecurrentTrainer:
     ) -> tuple[DataLoader[Any] | TimeStepMajorDataLoader, DataLoader[Any] | TimeStepMajorDataLoader, Any]:
         """Prepare training and evaluation datasets with memory-efficient loading."""
         logger.info("📚 Preparing datasets...")
+
+        # FAST PATH: Check for chunked datasets first (2-5 min vs 30-60 min)
+        if self.config.use_chunked_dataset and self.config.chunked_dataset_dir:
+            logger.info("🚀 Using chunked dataset (fast loading enabled)")
+            logger.info(f"📁 Chunked dataset directory: {self.config.chunked_dataset_dir}")
+            logger.info(f"📊 Load mode: {self.config.chunked_load_mode}")
+
+            from memxlnet.data import load_chunked_dataset
+
+            # Load training dataset from chunks
+            train_dataset = load_chunked_dataset(
+                dataset_dir=self.config.chunked_dataset_dir,
+                split=self.config.train_split,
+                mode=self.config.chunked_load_mode,
+                num_examples=self.config.chunked_num_examples or self.config.max_train_samples,
+                chunk_indices=self.config.chunked_chunk_indices,
+                max_n_segs=self.config.max_n_segs,
+            )
+
+            # Load evaluation dataset from chunks
+            # For eval: use same num_examples as training if in first_n mode, or max_eval_samples if set
+            eval_num_examples = None
+            if self.config.chunked_load_mode == "first_n":
+                eval_num_examples = self.config.chunked_num_examples or self.config.max_eval_samples
+
+            eval_dataset = load_chunked_dataset(
+                dataset_dir=self.config.chunked_dataset_dir,
+                split=self.config.eval_split,
+                mode=self.config.chunked_load_mode,
+                num_examples=eval_num_examples,
+                chunk_indices=None,  # Use all chunks for eval
+                max_n_segs=self.config.max_n_segs,
+            )
+
+            logger.info("✅ Loaded chunked datasets:")
+            logger.info(f"   Training documents: {len(train_dataset)}")
+            logger.info(f"   Evaluation documents: {len(eval_dataset)}")
+
+            # Create memory collate config only if memory enabled AND wrapper is active
+            memory_collate_cfg = None
+            if self.mem_token_info and hasattr(self.model, "get_initial_memory"):
+                from memxlnet.data import MemoryCollateConfig
+
+                memory_collate_cfg = MemoryCollateConfig(
+                    enable=True,
+                    mem_read_ids=self.mem_token_info["mem_read_ids"],
+                    mem_write_ids=self.mem_token_info["mem_write_ids"],
+                    max_seq_length=self.config.max_seq_length,
+                    cls_token_id=self.tokenizer.cls_token_id,
+                    pad_token_id=self.tokenizer.pad_token_id,
+                )
+
+            # Create dataloaders with time-step-major batching
+            # Note: Use num_workers=0 for ChunkedDataset to avoid multiprocessing/pickling issues
+            from memxlnet.data import create_dataloader
+
+            train_dataloader = create_dataloader(
+                train_dataset,  # type: ignore[arg-type]  # ChunkedDataset is compatible with Dataset protocol
+                batch_size=self.config.train_batch_size,
+                shuffle=True,
+                num_workers=0,  # ChunkedDataset doesn't work well with multiprocessing
+                memory_collate_config=memory_collate_cfg,
+                use_time_step_major=True,
+            )
+
+            eval_dataloader = create_dataloader(
+                eval_dataset,  # type: ignore[arg-type]  # ChunkedDataset is compatible with Dataset protocol
+                batch_size=self.config.eval_batch_size,
+                shuffle=False,
+                num_workers=0,  # ChunkedDataset doesn't work well with multiprocessing
+                memory_collate_config=memory_collate_cfg,
+                use_time_step_major=True,
+            )
+
+            logger.info("✅ Chunked dataset loading complete (fast path)")
+            return train_dataloader, eval_dataloader, eval_dataset
 
         # Only preprocess locally if NOT using Hub datasets
         # (create_dataset_from_cache handles Hub → local cache → process pipeline)

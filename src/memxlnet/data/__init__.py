@@ -1,5 +1,6 @@
 """Data processing and dataset utilities."""
 
+from memxlnet.data.chunked_dataset import ChunkedDataset, load_chunked_dataset
 from memxlnet.data.dataset import (
     ChunkedCacheManager,
     MemoryCollateConfig,
@@ -26,12 +27,14 @@ __all__ = [
     "ChunkedCacheManager",
     "TimeStepMajorDataLoader",
     "MemoryCollateConfig",
+    "ChunkedDataset",
     # Functions
     "create_dataloader",
     "create_dataset_from_cache",
     "process_and_cache_dataset",
     "configure_memory_tokens",
     "create_evaluation_dataloader",
+    "load_chunked_dataset",
     # HuggingFace Hub integration
     "upload_processed_dataset_to_hub",
     "load_dataset_from_hub",

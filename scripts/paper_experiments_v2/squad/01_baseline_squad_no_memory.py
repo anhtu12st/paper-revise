@@ -43,6 +43,10 @@ def create_config():
         max_train_samples=None,
         max_eval_samples=None,
         use_lazy_loading=False,
+        # Chunked dataset settings (FAST: 2-5 min vs 30-60 min preprocessing)
+        use_chunked_dataset=True,
+        chunked_dataset_dir="./preprocessed_data/squad_v2",
+        chunked_load_mode="streaming",  # Memory-efficient streaming
         # Realistic segment count for SQuAD v2 (most docs are 1-2 segments)
         progressive_segments=[2],
         max_n_segs=2,

@@ -1,0 +1,14 @@
+{
+  "dataset_name": "squad_v2",
+  "preprocessing_config": {
+    "chunk_size": 1000,
+    "max_seq_length": 384,
+    "doc_stride": 64,
+    "memory_num_tokens": 8
+  },
+  "splits": [
+    "train",
+    "validation"
+  ],
+  "output_dir": "preprocessed_data/squad_v2"
+}
