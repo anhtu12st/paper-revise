@@ -294,7 +294,14 @@ class XLNetRecurrentTrainer:
         # Initialize model (Memory-Augmented XLNet)
         logger.info("🏗️ Initializing MA-XLNet architecture")
 
-        if self.config.memory_num_tokens and self.config.memory_num_tokens > 0 and self.config.memory_impl == "token":
+        # Use MemXLNetForQA wrapper when ANY memory features are enabled:
+        # - Token-based memory (memory_impl == "token" with memory_num_tokens > 0)
+        # - Differentiable memory (use_differentiable_memory == True)
+        should_use_wrapper = (
+            self.config.memory_num_tokens and self.config.memory_num_tokens > 0 and self.config.memory_impl == "token"
+        ) or self.config.use_differentiable_memory
+
+        if should_use_wrapper:
             # If loading from a checkpoint that already has MemXLNet state, load via wrapper
             try:
                 self.model = MemXLNetForQA.from_pretrained(
@@ -302,6 +309,13 @@ class XLNetRecurrentTrainer:
                     mem_token_count=self.config.memory_num_tokens,
                     memory_init=self.config.memory_init,
                     memory_update=self.config.memory_update,
+                    # Enhanced memory parameters
+                    use_differentiable_memory=self.config.use_differentiable_memory,
+                    num_memory_heads=self.config.num_memory_heads,
+                    memory_sharpness=self.config.memory_sharpness,
+                    enable_usage_tracking=self.config.enable_usage_tracking,
+                    enable_temporal_links=self.config.enable_temporal_links,
+                    memory_slots=self.config.memory_slots,
                 )
             except Exception:
                 # Fallback: wrap the freshly loaded base model
@@ -1306,6 +1320,12 @@ class XLNetRecurrentTrainer:
         doc_token_type_ids = []
         doc_cls_indices = []
 
+        # 🔍 DIAGNOSTIC: Log which evaluation path is taken
+        if hasattr(self.model, "get_initial_memory"):
+            logger.debug("✅ Evaluation using wrapper path (differentiable memory)")
+        else:
+            logger.debug("⚠️  Evaluation using fallback path (XLNet mems)")
+
         # Wrapper path with explicit memory
         if hasattr(self.model, "get_initial_memory"):
             eval_memory_bank: dict[str, torch.Tensor] = {}
@@ -1414,6 +1434,8 @@ class XLNetRecurrentTrainer:
 
         # Fallback: original mems path
         mems = None
+        prev_batch_size = None  # Track batch size changes for mems compatibility
+
         for chunk in doc_batch:
             input_ids = chunk["input_ids"].to(self.device)
             attention_mask = chunk["attention_mask"].to(self.device)
@@ -1422,6 +1444,16 @@ class XLNetRecurrentTrainer:
                 token_type_ids = token_type_ids.to(self.device)
             start_positions = chunk["start_positions"].to(self.device)
             end_positions = chunk["end_positions"].to(self.device)
+
+            # 🔧 FIX: Track batch size and reset mems if it changes
+            batch_size = input_ids.size(0)
+            if prev_batch_size is not None and batch_size != prev_batch_size:
+                logger.debug(
+                    f"⚠️  Batch size changed from {prev_batch_size} to {batch_size}, resetting mems "
+                    f"(XLNet requires consistent batch size for memory concatenation)"
+                )
+                mems = None
+            prev_batch_size = batch_size
 
             outputs = self.model(
                 input_ids=input_ids,

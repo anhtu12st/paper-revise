@@ -60,48 +60,107 @@ model = MemXLNetForQA(
 
 ---
 
-## Multi-Hop Reasoning Utilities (🚧 Planned)
+## Multi-Hop Reasoning Utilities (✅ Completed - Phase 2)
 
 ### HopTracker
-**Status:** 🚧 Planned
+**Status:** ✅ Fully implemented and tested
 
 **Purpose:** Track reasoning chains across multiple hops in complex questions.
 
-**Planned Features:**
-- Automatic hop detection and recording
-- Confidence scoring per hop
-- Attention flow visualization
-- Bridge entity identification
+**Implemented Features:**
+- ✅ Automatic hop detection based on attention patterns
+- ✅ Bridge entity identification (entities spanning multiple segments)
+- ✅ Confidence scoring per hop
+- ✅ Reasoning chain reconstruction
+- ✅ Statistics and analysis export
 
-**Planned API:**
+**API:**
 ```python
-from memxlnet.utils.multihop_utils import HopTracker
+from memxlnet.utils import HopTracker
 
-tracker = HopTracker(track_attention=True, track_content=True)
-tracker.record_hop(memory_info, question_part="...", extracted_info="...")
-chain = tracker.get_reasoning_chain(question, answer)
+tracker = HopTracker(min_attention_threshold=0.1)
+
+# Track each segment
+for seg_idx, segment_data in enumerate(segments):
+    entities = extract_entities(segment_data["text"])
+    attention = model_outputs["attention_weights"]
+    tracker.track_segment(seg_idx, attention, entities)
+
+# Mark answer for analysis
+tracker.mark_answer("answer text", answer_segment=2)
+
+# Get analysis results
+bridge_entities = tracker.detect_bridge_entities()
+reasoning_hops = tracker.detect_hops()
+hop_sequence = tracker.get_hop_sequence(to_answer=True)
+stats = tracker.get_statistics()
+
+# Export to JSON
+tracker.export_analysis("analysis.json")
 ```
 
 ### MemoryVisualizer
-**Status:** 🚧 Planned
+**Status:** ✅ Fully implemented and tested
 
 **Purpose:** Visualize memory state and attention patterns.
 
-**Planned Features:**
-- Memory state heatmaps
-- Usage pattern visualization
-- Temporal link graphs
-- Attention flow diagrams
+**Implemented Features:**
+- ✅ Attention weight heatmaps (read/write)
+- ✅ Memory usage timelines
+- ✅ Temporal link matrix visualization
+- ✅ Multi-head attention comparison
+- ✅ Attention distribution analysis
+- ✅ Animated segment-by-segment progression
+- ✅ Comprehensive summary reports
 
-**Planned API:**
+**API:**
 ```python
-from memxlnet.utils.multihop_utils import MemoryVisualizer
+from memxlnet.utils import MemoryVisualizer
 
-visualizer = MemoryVisualizer()
-fig = visualizer.plot_memory_heatmap(memory_state, title="Memory State")
-fig = visualizer.plot_usage_pattern(usage, temporal_links)
-fig = visualizer.plot_attention_flow(attention_weights)
+visualizer = MemoryVisualizer(output_dir="./visualizations")
+
+# Plot attention heatmaps
+visualizer.plot_attention_heatmap(
+    weights=read_weights,
+    title="Read Attention - Segment 1",
+    save_path="read_attention.png"
+)
+
+# Plot usage timeline
+visualizer.plot_usage_timeline(
+    usage_history=usage_data,
+    save_path="usage_timeline.png"
+)
+
+# Plot temporal links
+visualizer.plot_temporal_links(
+    temporal_links=link_matrix,
+    save_path="temporal_links.png"
+)
+
+# Multi-head comparison
+visualizer.plot_multi_head_comparison(
+    heads_weights=attention_weights,
+    save_path="multi_head_comparison.png"
+)
+
+# Create comprehensive summary
+visualizer.create_summary_report(
+    memory_data=memory_history,
+    save_path="summary_report"
+)
+
+# Create animation
+visualizer.create_animation(
+    segment_data=segment_history,
+    output_path="memory_evolution.gif"
+)
 ```
+
+**Test Coverage:**
+- Unit tests: `tests/unit/test_multihop_utils.py` (35 tests passing)
+- Unit tests: `tests/unit/test_memory_visualization.py` (25 tests passing)
+- Example: `examples/analyze_memory_attention.py`
 
 ---
 
@@ -132,11 +191,13 @@ Save and restore memory states between training sessions for continual learning.
 - [x] Example script
 - [x] Documentation updates
 
-### Phase 2: Visualization & Analysis Tools
-- [ ] HopTracker implementation
-- [ ] MemoryVisualizer implementation
-- [ ] Attention analysis utilities
-- [ ] Example notebooks
+### Phase 2: Visualization & Analysis Tools (✅ Completed - January 2025)
+- [x] HopTracker implementation
+- [x] MemoryVisualizer implementation
+- [x] Attention analysis utilities
+- [x] Example script (`examples/analyze_memory_attention.py`)
+- [x] Unit tests (60 tests total)
+- [x] Training comparison script (`scripts/train_comparison_full.py`)
 
 ### Phase 3: Advanced Features
 - [ ] Adaptive memory allocation
@@ -245,6 +306,62 @@ if "memory_info" in outputs:
 
 ---
 
-**Last Updated:** January 2025 (Phase 1 Completed)
+**Last Updated:** January 2025 (Phase 1 & 2 Completed)
 **Next Review:** Quarterly or after major implementation milestones
-**Next Phase:** Visualization & Analysis Tools (Phase 2)
+**Current Status:** Phase 1 & 2 Complete ✅
+**Next Phase:** Advanced Features (Phase 3)
+
+---
+
+## Phase 2 Completion Summary (January 2025)
+
+Phase 2 (Visualization & Analysis Tools) is now complete! This includes:
+
+### HopTracker
+- **Complete hop detection** based on attention patterns
+- **Bridge entity identification** for multi-segment reasoning
+- **Reasoning chain reconstruction** from question to answer
+- **Comprehensive statistics** and JSON export
+- **35 unit tests** covering all functionality
+
+### MemoryVisualizer
+- **Attention heatmaps** for read/write operations
+- **Usage timelines** showing memory evolution
+- **Temporal link visualization** for relationship tracking
+- **Multi-head comparison plots** for analysis
+- **Animated visualizations** for segment progression
+- **Summary reports** with multiple visualization types
+- **25 unit tests** ensuring correctness
+
+### Training & Analysis Scripts
+- **Validation script** (`scripts/validate_differentiable_memory.py`) - Quick validation of differentiable memory
+- **Analysis example** (`examples/analyze_memory_attention.py`) - Complete analysis workflow
+- **Full training comparison** (`scripts/train_comparison_full.py`) - Token-based vs differentiable memory comparison
+
+### Getting Started with Phase 2 Tools
+
+```python
+# Analyze memory attention patterns
+from memxlnet.utils import HopTracker, MemoryVisualizer
+
+# Track reasoning hops
+tracker = HopTracker()
+for seg_idx, data in enumerate(segments):
+    tracker.track_segment(seg_idx, attention, entities)
+
+bridge_entities = tracker.detect_bridge_entities()
+hops = tracker.detect_hops()
+tracker.export_analysis("analysis.json")
+
+# Create visualizations
+visualizer = MemoryVisualizer(output_dir="./viz")
+visualizer.plot_attention_heatmap(read_weights, save_path="attention.png")
+visualizer.plot_usage_timeline(usage_history, save_path="usage.png")
+visualizer.create_summary_report(memory_data, save_path="summary")
+```
+
+**See also:**
+- Example: `examples/analyze_memory_attention.py`
+- Tests: `tests/unit/test_multihop_utils.py`, `tests/unit/test_memory_visualization.py`
+- Validation: `scripts/validate_differentiable_memory.py`
+- Comparison: `scripts/train_comparison_full.py`

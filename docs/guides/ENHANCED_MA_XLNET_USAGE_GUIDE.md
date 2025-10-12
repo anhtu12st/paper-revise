@@ -12,9 +12,11 @@
 > - Basic training and configuration
 > - Progressive training
 >
+> **✅ Phase 2 Complete (January 2025):**
+> - **HopTracker** for multi-hop reasoning analysis ✅ **NEW!**
+> - **MemoryVisualizer** for attention visualization ✅ **NEW!**
+>
 > **🚧 Planned Features (Not Yet Implemented):**
-> - HopTracker and multi-hop reasoning utilities
-> - MemoryVisualizer and attention visualization
 > - Advanced memory features (adaptive allocation, compression, etc.)
 >
 > See [PLANNED_FEATURES.md](../PLANNED_FEATURES.md) for complete implementation status.
@@ -272,38 +274,71 @@ model_dynamic = MemXLNetForQA(
 # The model will automatically allocate less-used slots for new information
 ```
 
-## Multi-Hop Reasoning (🚧 Planned - Not Yet Implemented)
+## Multi-Hop Reasoning (✅ Available Now!)
 
-> **⚠️ Note:** The utilities described in this section are planned but not yet implemented.
-> The imports will fail with `ModuleNotFoundError`. See [PLANNED_FEATURES.md](../PLANNED_FEATURES.md).
-
-### 1. Reasoning Chain Tracking (🚧 Planned)
+### 1. Reasoning Chain Tracking
 
 ```python
-# 🚧 NOT YET AVAILABLE - This will fail with ImportError
-from memxlnet.utils.multihop_utils import HopTracker
+from memxlnet.utils import HopTracker, extract_simple_entities
 
 # Initialize hop tracker
-tracker = HopTracker(track_attention=True, track_content=True)
+tracker = HopTracker(min_attention_threshold=0.1)
 
-# Process question with tracking
-tracker.reset()
+# Process multi-segment document
+question = "What is the population of France?"
+segments = [
+    "Paris is the capital of France.",
+    "France has a population of 67 million people.",
+    "The Eiffel Tower is located in Paris."
+]
 
-inputs = tokenizer(question, context, return_tensors="pt")
-outputs = model_enhanced(**inputs)
+# Track each segment
+for seg_idx, segment_text in enumerate(segments):
+    # Get model outputs
+    inputs = tokenizer(question, segment_text, return_tensors="pt")
+    outputs = model_enhanced(**inputs)
 
-# Record reasoning hop
-if 'memory_info' in outputs:
-    tracker.record_hop(
-        outputs['memory_info'],
-        question_part="Identifying bridge entity",
-        extracted_info="Found Eiffel Tower in Paris"
-    )
+    # Extract entities from segment
+    entities = extract_simple_entities(segment_text)
 
-# Get complete reasoning chain
-chain = tracker.get_reasoning_chain(question, answer)
-print(f"Reasoning confidence: {chain.total_confidence:.3f}")
-print(f"Number of hops: {len(chain.hops)}")
+    # Get attention weights from memory info
+    if 'memory_info' in outputs:
+        # Average attention across heads
+        read_weights = outputs['memory_info']['read_weights']
+        avg_attention = read_weights.mean(dim=1).cpu().numpy()
+
+        # Track this segment
+        tracker.track_segment(
+            segment_idx=seg_idx,
+            attention_weights=avg_attention,
+            entities=entities,
+            segment_text=segment_text
+        )
+
+# Mark the answer segment
+tracker.mark_answer("67 million people", answer_segment=1)
+
+# Analyze reasoning hops
+bridge_entities = tracker.detect_bridge_entities(min_segments=2)
+print(f"Bridge entities: {[e.text for e in bridge_entities]}")
+
+reasoning_hops = tracker.detect_hops()
+print(f"Detected {len(reasoning_hops)} reasoning hops")
+
+# Get hop sequence to answer
+hop_sequence = tracker.get_hop_sequence(to_answer=True)
+for i, hop in enumerate(hop_sequence):
+    print(f"Hop {i+1}: Segment {hop.from_segment} → {hop.to_segment}")
+    print(f"  Via: {hop.bridging_entity} (confidence: {hop.confidence:.3f})")
+
+# Get statistics
+stats = tracker.get_statistics()
+print(f"Total entities: {stats['num_entities']}")
+print(f"Bridge entities: {stats['num_bridge_entities']}")
+print(f"Reasoning hops: {stats['num_hops']}")
+
+# Export analysis to JSON
+tracker.export_analysis("reasoning_analysis.json")
 ```
 
 ### 2. Bridge Entity Detection
@@ -336,53 +371,151 @@ if bridge_scores is not None:
     print(f"Bridge entity scores: {bridge_scores}")
 ```
 
-## Memory Visualization (🚧 Planned - Not Yet Implemented)
+## Memory Visualization (✅ Available Now!)
 
-> **⚠️ Note:** The visualization utilities described in this section are planned but not yet implemented.
-> The imports will fail with `ModuleNotFoundError`. See [PLANNED_FEATURES.md](../PLANNED_FEATURES.md).
-
-### 1. Memory State Visualization (🚧 Planned)
+### 1. Basic Visualizations
 
 ```python
-# 🚧 NOT YET AVAILABLE - This will fail with ImportError
-from memxlnet.utils.multihop_utils import MemoryVisualizer
+from memxlnet.utils import MemoryVisualizer
 
 # Create visualizer
-visualizer = MemoryVisualizer()
+visualizer = MemoryVisualizer(output_dir="./visualizations")
 
-# Get memory data
-if model_enhanced.memory_controller:
-    viz_data = model_enhanced.memory_controller.visualize_memory()
+# Get memory outputs from model
+outputs = model_enhanced(**inputs)
 
-    # Create memory heatmap
-    fig = visualizer.plot_memory_heatmap(
-        viz_data['memory'],
-        title="Current Memory State"
+if 'memory_info' in outputs:
+    memory_info = outputs['memory_info']
+
+    # Plot read attention heatmap
+    visualizer.plot_attention_heatmap(
+        weights=memory_info['read_weights'][0].cpu().numpy(),
+        title="Read Attention Weights",
+        save_path="read_attention.png"
     )
-    if fig:
-        fig.savefig("memory_state.png")
 
-    # Plot usage patterns
-    if 'usage' in viz_data:
-        fig = visualizer.plot_usage_pattern(
-            viz_data['usage'],
-            viz_data.get('temporal_links')
+    # Plot write attention heatmap
+    visualizer.plot_attention_heatmap(
+        weights=memory_info['write_weights'][0].cpu().numpy(),
+        title="Write Attention Weights",
+        save_path="write_attention.png"
+    )
+
+    # Plot memory usage (if tracking enabled)
+    if 'usage' in memory_info:
+        usage = memory_info['usage'][0].cpu().numpy()
+        visualizer.plot_usage_timeline(
+            usage_history=[usage],
+            save_path="memory_usage.png"
         )
-        if fig:
-            fig.savefig("memory_usage.png")
+
+print("Visualizations saved to ./visualizations/")
 ```
 
-### 2. Attention Flow Visualization
+### 2. Multi-Head Attention Comparison
 
 ```python
-# Visualize attention flow across reasoning hops
+# Compare attention patterns across different heads
 if 'memory_info' in outputs:
-    tracker.record_hop(outputs['memory_info'])
+    read_weights = outputs['memory_info']['read_weights'][0].cpu().numpy()
+    write_weights = outputs['memory_info']['write_weights'][0].cpu().numpy()
 
-    # Generate attention flow visualization
-    fig = tracker.visualize_attention_flow()
-    if fig:
-        fig.savefig("attention_flow.png")
+    # Multi-head read attention comparison
+    visualizer.plot_multi_head_comparison(
+        heads_weights=read_weights,
+        save_path="multi_head_read.png",
+        operation="Read"
+    )
+
+    # Multi-head write attention comparison
+    visualizer.plot_multi_head_comparison(
+        heads_weights=write_weights,
+        save_path="multi_head_write.png",
+        operation="Write"
+    )
+
+    # Attention distribution analysis
+    visualizer.plot_attention_distribution(
+        read_weights=read_weights,
+        write_weights=write_weights,
+        save_path="attention_distribution.png"
+    )
+```
+
+### 3. Temporal Evolution Visualization
+
+```python
+# Track memory evolution across multiple segments
+segment_data = []
+
+for seg_idx, segment in enumerate(segments):
+    inputs = tokenizer(question, segment, return_tensors="pt")
+    outputs = model_enhanced(**inputs)
+
+    if 'memory_info' in outputs:
+        memory_info = outputs['memory_info']
+
+        # Store segment data
+        segment_data.append({
+            'read_weights': memory_info['read_weights'][0].cpu().numpy(),
+            'write_weights': memory_info['write_weights'][0].cpu().numpy(),
+            'usage': memory_info['usage'][0].cpu().numpy() if 'usage' in memory_info else None,
+        })
+
+# Create usage timeline
+usage_history = [data['usage'] for data in segment_data if data['usage'] is not None]
+if usage_history:
+    visualizer.plot_usage_timeline(
+        usage_history=usage_history,
+        save_path="usage_timeline.png",
+        title="Memory Usage Across Segments"
+    )
+
+# Create animation (GIF)
+visualizer.create_animation(
+    segment_data=segment_data,
+    output_path="memory_evolution.gif",
+    fps=2,
+    title="Memory Evolution"
+)
+```
+
+### 4. Comprehensive Analysis Report
+
+```python
+# Generate comprehensive summary with all visualizations
+memory_data = {
+    'read_weights': [data['read_weights'] for data in segment_data],
+    'write_weights': [data['write_weights'] for data in segment_data],
+    'usage': np.array([data['usage'] for data in segment_data if data['usage'] is not None]),
+}
+
+# This creates multiple plots:
+# - summary_read_attention.png
+# - summary_write_attention.png
+# - summary_usage_timeline.png
+# - summary_distribution.png
+visualizer.create_summary_report(
+    memory_data=memory_data,
+    save_path="summary"
+)
+
+print("Comprehensive analysis saved to ./visualizations/summary_*.png")
+```
+
+### 5. Complete Analysis Example
+
+```python
+# See examples/analyze_memory_attention.py for a complete working example
+# that demonstrates:
+# - Loading a trained model
+# - Processing multi-segment documents
+# - Tracking reasoning hops with HopTracker
+# - Creating visualizations with MemoryVisualizer
+# - Generating comprehensive analysis reports
+
+# Run the example:
+# python examples/analyze_memory_attention.py
 ```
 
 ## Training Guide
@@ -675,15 +808,46 @@ model = MemXLNetForQA(
 **Problem:** Visualization functions not working
 ```python
 # Install visualization dependencies
-# pip install matplotlib seaborn
+pip install matplotlib
 
-# Check if available
-from memxlnet.utils.multihop_utils import VISUALIZATION_AVAILABLE
-if not VISUALIZATION_AVAILABLE:
-    print("Install visualization dependencies: pip install matplotlib seaborn")
+# Import and use visualizer
+from memxlnet.utils import MemoryVisualizer
+
+visualizer = MemoryVisualizer(output_dir="./viz")
+# If no errors, visualization is working correctly
+
+# For animated visualizations (GIF), ensure Pillow is installed
+pip install pillow
 ```
 
-#### 5. Save/Load Issues
+#### 5. XLNet Memory Cache Batch Size Mismatch
+
+**Problem:** RuntimeError during evaluation: "Sizes of tensors must match except in dimension 0"
+
+```
+RuntimeError: Sizes of tensors must match except in dimension 0.
+Expected size 8 but got size 4 for tensor number 1 in the list.
+```
+
+**Cause:** XLNet maintains internal memory caches that are tied to batch size. If `train_batch_size != eval_batch_size`, tensor concatenation fails when switching between training and evaluation.
+
+**Solution:** Use the same batch size for training and evaluation:
+```python
+config = TrainingConfig(
+    train_batch_size=8,
+    eval_batch_size=8,  # Must match train_batch_size
+)
+```
+
+**Why this happens:**
+- XLNet uses recurrent memory caching (`prev_mem`) during training
+- Memory tensors have shape `[seq_len, batch_size, hidden_dim]`
+- When evaluation starts with different batch size, concatenation fails
+- This is a limitation of XLNet's architecture, not the memory-augmented implementation
+
+**Best practice:** Always use matching batch sizes for train and eval when using XLNet-based models.
+
+#### 6. Save/Load Issues
 
 **Problem:** Model not loading correctly
 ```python
@@ -731,9 +895,33 @@ model = MemXLNetForQA.from_pretrained(
 
 ## Conclusion
 
-The enhanced MA-XLNet provides powerful new capabilities for multi-hop question answering while maintaining full backward compatibility. Start with basic configurations and gradually explore advanced features as needed for your specific use case.
+The enhanced MA-XLNet provides powerful new capabilities for multi-hop question answering while maintaining full backward compatibility. With Phase 2 complete, you now have access to comprehensive analysis and visualization tools to understand and improve your models.
 
-For more examples and usage patterns, see:
-- `examples/validate_answer_spans.py` - Answer span validation examples
-- `tests/unit/test_answer_span_validation.py` - Answer span validation tests
-- `tests/unit/test_multi_segment_answers.py` - Multi-segment answer tests
+### Available Tools and Scripts
+
+**Training and Validation:**
+- `scripts/validate_differentiable_memory.py` - Quick validation (~30 minutes)
+- `scripts/train_comparison_full.py` - Full token-based vs differentiable comparison
+- `scripts/phase2_train.py` - Production training script
+
+**Analysis and Visualization:**
+- `examples/analyze_memory_attention.py` - Complete analysis workflow
+- `examples/train_with_differentiable_memory.py` - Differentiable memory demo
+
+**Testing:**
+- `tests/unit/test_memory_modules.py` - Memory system tests (26 tests)
+- `tests/unit/test_multihop_utils.py` - HopTracker tests (35 tests)
+- `tests/unit/test_memory_visualization.py` - Visualization tests (25 tests)
+- `tests/integration/test_differentiable_memory_training.py` - Integration tests (13 tests)
+
+### Next Steps
+
+1. **Start with validation**: Run `python scripts/validate_differentiable_memory.py`
+2. **Explore analysis tools**: Run `python examples/analyze_memory_attention.py`
+3. **Full comparison**: Run `python scripts/train_comparison_full.py` (overnight)
+4. **Production training**: Customize and run `scripts/phase2_train.py`
+
+For more details, see:
+- [PLANNED_FEATURES.md](../PLANNED_FEATURES.md) - Implementation status
+- [API Reference](../api/API_REFERENCE.md) - Complete API documentation
+- [Testing Guide](TESTING_VALIDATION_GUIDE.md) - Testing and validation
