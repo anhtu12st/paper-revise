@@ -467,12 +467,51 @@ class MemXLNetForQA(nn.Module):
 
         from transformers import XLNetForQuestionAnsweringSimple
 
-        # Load base model
-        base = XLNetForQuestionAnsweringSimple.from_pretrained(load_directory)
+        # Separate HuggingFace Hub kwargs from model kwargs
+        hf_hub_kwargs = {}
+        hf_specific_keys = {
+            "revision",
+            "token",
+            "cache_dir",
+            "force_download",
+            "resume_download",
+            "proxies",
+            "local_files_only",
+            "use_auth_token",
+            "subfolder",
+            "commit_hash",
+            "use_safetensors",
+            "trust_remote_code",
+        }
 
-        # Check for memory configuration
-        config_path = os.path.join(load_directory, "memxlnet_config.json")
-        state_path = os.path.join(load_directory, "memxlnet_state.pt")
+        for key in hf_specific_keys:
+            if key in kwargs:
+                hf_hub_kwargs[key] = kwargs.pop(key)
+
+        # Load base model with HuggingFace Hub kwargs
+        base = XLNetForQuestionAnsweringSimple.from_pretrained(load_directory, **hf_hub_kwargs)
+
+        # Check for memory configuration (handle both local and Hub paths)
+        try:
+            # Try to load from Hub first if revision is specified
+            if "revision" in hf_hub_kwargs or not os.path.exists(load_directory):
+                from huggingface_hub import hf_hub_download
+
+                # Download config from Hub
+                config_path = hf_hub_download(repo_id=load_directory, filename="memxlnet_config.json", **hf_hub_kwargs)
+                # Download state from Hub
+                try:
+                    state_path = hf_hub_download(repo_id=load_directory, filename="memxlnet_state.pt", **hf_hub_kwargs)
+                except Exception:
+                    state_path = None  # State file might not exist
+            else:
+                # Local paths
+                config_path = os.path.join(load_directory, "memxlnet_config.json")
+                state_path = os.path.join(load_directory, "memxlnet_state.pt")
+        except Exception:
+            # Fall back to local paths
+            config_path = os.path.join(load_directory, "memxlnet_config.json")
+            state_path = os.path.join(load_directory, "memxlnet_state.pt")
 
         if os.path.exists(config_path):
             # Load wrapper configuration
@@ -497,7 +536,7 @@ class MemXLNetForQA(nn.Module):
             wrapper = cls(base, **wrapper_kwargs)
 
             # Load memory state if exists
-            if os.path.exists(state_path) and wrapper.mem_token_count > 0:
+            if state_path and os.path.exists(state_path) and wrapper.mem_token_count > 0:
                 device = next(base.parameters()).device
                 saved_state = torch.load(state_path, map_location=device, weights_only=True)
 
