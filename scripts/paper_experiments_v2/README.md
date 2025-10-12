@@ -226,8 +226,8 @@ TrainingConfig(
 
     # Training settings
     num_epochs=3,
-    train_batch_size=16,
-    eval_batch_size=32,
+    train_batch_size=8,
+    eval_batch_size=16,
     learning_rate=3e-5,
 
     # Phase 2 warmup
@@ -255,8 +255,8 @@ TrainingConfig(
 
     # Training settings
     num_epochs=3,
-    train_batch_size=16,
-    eval_batch_size=32,
+    train_batch_size=8,
+    eval_batch_size=16,
     learning_rate=3e-5,
 
     # Phase 2 warmup

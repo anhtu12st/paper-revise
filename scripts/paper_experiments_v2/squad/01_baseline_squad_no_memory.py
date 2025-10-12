@@ -54,8 +54,8 @@ def create_config():
         use_global_softmax=False,
         # Training hyperparameters
         num_epochs=3,
-        train_batch_size=16,
-        eval_batch_size=32,
+        train_batch_size=8,
+        eval_batch_size=16,
         learning_rate=3e-5,
         weight_decay=0.01,
         warmup_ratio=0.1,
