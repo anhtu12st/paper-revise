@@ -25,6 +25,7 @@ except ImportError:
 from memxlnet.data.dataset import (
     TimeStepMajorDataLoader,
     configure_memory_tokens,
+    create_dataloader,
     create_dataset_from_cache,
     process_and_cache_dataset,
 )
@@ -513,10 +514,6 @@ class XLNetRecurrentTrainer:
                     cls_token_id=self.tokenizer.cls_token_id,
                     pad_token_id=self.tokenizer.pad_token_id,
                 )
-
-            # Create dataloaders with time-step-major batching
-            # Note: Use num_workers=0 for ChunkedDataset to avoid multiprocessing/pickling issues
-            from memxlnet.data import create_dataloader
 
             train_dataloader = create_dataloader(
                 train_dataset,  # type: ignore[arg-type]  # ChunkedDataset is compatible with Dataset protocol

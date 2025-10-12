@@ -206,7 +206,7 @@ def print_detailed_comparison(token_result, diff_result):
         print(f"{label:<30} {token_val:>19.2f} {diff_val:>19.2f} {improvement_str:>14}")
 
     # Training time
-    print(f"\n⏱️  TRAINING TIME:")
+    print("\n⏱️  TRAINING TIME:")
     print(f"   Token-Based:     {token_result.get('training_time_formatted', 'N/A')}")
     print(f"   Differentiable:  {diff_result.get('training_time_formatted', 'N/A')}")
 
@@ -216,7 +216,7 @@ def print_detailed_comparison(token_result, diff_result):
         print(f"   Difference:      {time_diff / 60:+.1f} minutes ({time_diff_pct:+.1f}%)")
 
     # Analysis
-    print(f"\n🔍 ANALYSIS:")
+    print("\n🔍 ANALYSIS:")
 
     token_f1 = token_result.get("f1", 0.0)
     diff_f1 = diff_result.get("f1", 0.0)
@@ -238,9 +238,13 @@ def print_detailed_comparison(token_result, diff_result):
 
     # Has/No answer breakdown
     if diff_result.get("has_answer_f1", 0.0) > 0:
-        print(f"\n📊 BREAKDOWN (Differentiable Memory):")
-        print(f"   • Has-Answer Performance: F1={diff_result['has_answer_f1']:.2f}%, EM={diff_result.get('has_answer_exact', 0.0):.2f}%")
-        print(f"   • No-Answer Performance:  F1={diff_result['no_answer_f1']:.2f}%, EM={diff_result.get('no_answer_exact', 0.0):.2f}%")
+        print("\n📊 BREAKDOWN (Differentiable Memory):")
+        print(
+            f"   • Has-Answer Performance: F1={diff_result['has_answer_f1']:.2f}%, EM={diff_result.get('has_answer_exact', 0.0):.2f}%"
+        )
+        print(
+            f"   • No-Answer Performance:  F1={diff_result['no_answer_f1']:.2f}%, EM={diff_result.get('no_answer_exact', 0.0):.2f}%"
+        )
 
         # Identify weaknesses
         if diff_result["has_answer_f1"] < 40:
