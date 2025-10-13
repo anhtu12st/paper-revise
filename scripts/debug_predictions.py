@@ -71,6 +71,7 @@ def debug_model_predictions(model_path: str, num_samples: int = 10):
         print(f"\n📚 Loading {num_samples} evaluation samples...")
         from memxlnet.data.dataset import create_dataset_from_cache
 
+        # Disable Hub dataset to use local processing
         eval_dataset = create_dataset_from_cache(
             dataset_name=config.dataset_name,
             split=config.eval_split,
@@ -80,6 +81,7 @@ def debug_model_predictions(model_path: str, num_samples: int = 10):
             doc_stride=config.doc_stride,
             max_n_segs=None,
             tokenizer=trainer.tokenizer,
+            use_hub_dataset=False,  # Don't try to load from Hub
         )
 
         print(f"✅ Loaded dataset with {len(eval_dataset)} features")
@@ -127,8 +129,9 @@ def debug_model_predictions(model_path: str, num_samples: int = 10):
                         token_type_ids=token_type_ids,
                     )
 
-                start_logits = outputs.start_logits[0].cpu().numpy()
-                end_logits = outputs.end_logits[0].cpu().numpy()
+                # Model returns dict, not object with attributes
+                start_logits = outputs["start_logits"][0].cpu().numpy()
+                end_logits = outputs["end_logits"][0].cpu().numpy()
 
                 # Find best answer span
                 best_start_idx = start_logits.argmax()
