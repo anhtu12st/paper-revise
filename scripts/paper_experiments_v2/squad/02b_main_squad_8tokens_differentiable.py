@@ -44,16 +44,16 @@ def create_config():
         train_split="train",
         eval_split="validation",
         cache_dir="./.cache",
-        max_train_samples=None,
-        max_eval_samples=None,
-        use_lazy_loading=False,
+        max_train_samples=1000,
+        max_eval_samples=200,
+        use_lazy_loading=True,
         # Chunked dataset settings (FAST: 2-5 min vs 30-60 min preprocessing)
         use_chunked_dataset=True,
         chunked_dataset_dir="./preprocessed_data/squad_v2",
         chunked_load_mode="streaming",  # Memory-efficient streaming
         progressive_segments=[2],
         max_n_segs=2,
-        memory_num_tokens=8,
+        memory_num_tokens=0,  # ✅ FIXED: Differentiable memory doesn't need special tokens
         memory_update="gated",
         memory_init="learned",
         # ✅ FIXED: Use differentiable memory instead of token-based
@@ -66,7 +66,7 @@ def create_config():
         enable_usage_tracking=True,
         enable_temporal_links=True,
         # Global softmax and training settings
-        use_global_softmax=True,
+        use_global_softmax=False,
         num_epochs=3,
         train_batch_size=8,
         eval_batch_size=16,

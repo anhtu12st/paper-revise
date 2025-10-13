@@ -745,6 +745,8 @@ class XLNetRecurrentTrainer:
                 start_positions = batch["start_positions"].to(self.device)
                 end_positions = batch["end_positions"].to(self.device)
                 document_mask = batch["document_mask"].to(self.device)
+                print("="*100)
+                print(input_ids)
 
                 # Build memory_state tensor per batch ordering
                 memory_states = []
@@ -1019,11 +1021,7 @@ class XLNetRecurrentTrainer:
             context = chunk_data["context"]
             tts = chunk_data.get("token_type_ids", None)
             ids = chunk_data.get("input_ids", None)
-            if tts is not None and offset_mapping:
-                # enforce context-only
-                offset_mapping = [
-                    (s, e) if (i < len(tts) and tts[i] == 1) else (0, 0) for i, (s, e) in enumerate(offset_mapping)
-                ]
+            # Note: offset_mapping filtering removed - span filtering logic handles this
 
             # Ensure arrays are 1D
             if start_logits.ndim > 1:
@@ -1104,7 +1102,18 @@ class XLNetRecurrentTrainer:
                     if start_idx < len(offset_mapping) and end_idx < len(offset_mapping) and context:
                         start_char = offset_mapping[start_idx][0]
                         end_char = offset_mapping[end_idx][1]
+
+                        # Validate span before extraction
+                        if start_char >= end_char or start_char < 0 or end_char > len(context):
+                            continue  # Invalid character span
+                        if end_idx - start_idx > 60:  # Token-level length check
+                            continue  # Span too long (SQuAD answers typically < 30 tokens)
+
                         answer_text = context[start_char:end_char].strip()
+
+                        # Validate extracted text
+                        if len(answer_text) == 0 or len(answer_text) > 300:  # Character-level length check
+                            continue  # Empty or suspiciously long answer
 
                         if segment_best_score is None or score > segment_best_score:
                             segment_best_score = score

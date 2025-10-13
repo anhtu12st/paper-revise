@@ -145,20 +145,42 @@ def debug_model_predictions(model_path: str, num_samples: int = 10):
                 cls_idx = cls_positions[-1] if cls_positions else len(start_logits) - 1
                 no_answer_score = start_logits[cls_idx] + end_logits[cls_idx]
 
-                # Extract answer text
-                if best_start_idx <= best_end_idx and best_start_idx < len(input_ids_list):
+                # Extract answer text using offset mapping (better than token decoding)
+                offset_mapping = feature.get("offset_mapping", [])
+                context = feature.get("context", "")
+                token_type_ids_list = token_type_ids[0].tolist() if hasattr(token_type_ids, 'tolist') else token_type_ids
+
+                # Check if span is in context tokens
+                is_context_span = False
+                if best_start_idx < len(token_type_ids_list) and best_end_idx < len(token_type_ids_list):
+                    is_context_span = token_type_ids_list[best_start_idx] == 1 and token_type_ids_list[best_end_idx] == 1
+
+                # Extract using offsets if available
+                if offset_mapping and best_start_idx < len(offset_mapping) and best_end_idx < len(offset_mapping) and context:
+                    start_char = offset_mapping[best_start_idx][0]
+                    end_char = offset_mapping[best_end_idx][1]
+                    if start_char < end_char and end_char <= len(context):
+                        answer_text = context[start_char:end_char].strip()
+                    else:
+                        answer_text = "[INVALID OFFSET]"
+                elif best_start_idx <= best_end_idx and best_start_idx < len(input_ids_list):
                     answer_tokens = input_ids_list[best_start_idx : best_end_idx + 1]
                     answer_text = trainer.tokenizer.decode(answer_tokens, skip_special_tokens=True)
                 else:
                     answer_text = "[INVALID SPAN]"
 
+                # Count context vs question tokens
+                context_token_count = sum(1 for t in token_type_ids_list if t == 1)
+                question_token_count = sum(1 for t in token_type_ids_list if t == 0)
+
                 print(f"\n📝 Sample {i + 1}:")
                 print(f"   Example ID: {feature.get('example_id', 'unknown')}")
-                print(f"   Best answer span: [{best_start_idx}, {best_end_idx}]")
+                print(f"   Sequence info: {len(input_ids_list)} tokens ({context_token_count} context, {question_token_count} question/special)")
+                print(f"   Best answer span: [{best_start_idx}, {best_end_idx}] (is_context={is_context_span}, span_length={best_end_idx - best_start_idx + 1})")
                 print(f"   Best answer score: {best_score:.4f}")
                 print(f"   No-answer score (CLS@{cls_idx}): {no_answer_score:.4f}")
                 print(f"   Score difference: {best_score - no_answer_score:.4f}")
-                print(f"   Predicted text: '{answer_text}'")
+                print(f"   Predicted text: '{answer_text[:200]}{'...' if len(answer_text) > 200 else ''}'")
 
                 # Show ground truth if available
                 if "chosen_answer_text" in feature:
