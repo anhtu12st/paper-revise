@@ -66,8 +66,8 @@ def create_base_config():
         "warmup_ratio": 0.1,
         "max_grad_norm": 1.0,
         "gradient_accumulation_steps": 1,
-        "eval_steps": 100,  # Eval every 100 steps
-        "save_steps": 500,
+        "eval_steps": 5000,  # Eval every 100 steps
+        "save_steps": 5000,
         "logging_steps": 25,
         "save_total_limit": 2,
         "no_answer_threshold": 0.0,  # Start with 0.0 to allow all predictions
