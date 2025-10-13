@@ -61,38 +61,55 @@ def debug_model_predictions(model_path: str, num_samples: int = 10):
 
         if checkpoint_path.exists():
             print(f"✅ Loading checkpoint from: {checkpoint_path}")
-            trainer.model.load_state_dict(torch.load(checkpoint_path / "pytorch_model.bin"))
+            checkpoint = torch.load(checkpoint_path / "pytorch_model.bin", map_location=trainer.device)
+            trainer.model.load_state_dict(checkpoint)
         else:
             print("⚠️  No checkpoint found, using freshly initialized model")
+            print("   (Predictions will be random)")
 
-        # Prepare evaluation data
+        # Prepare evaluation data - FIXED: Use create_dataset_from_cache
         print(f"\n📚 Loading {num_samples} evaluation samples...")
-        from memxlnet.data.dataset import process_and_cache_dataset
+        from memxlnet.data.dataset import create_dataset_from_cache
 
-        eval_features = process_and_cache_dataset(
-            config.dataset_name,
-            config.eval_split,
-            trainer.tokenizer,
-            config.max_seq_length,
-            config.doc_stride,
-            config.cache_dir,
-            max_samples=num_samples,
+        eval_dataset = create_dataset_from_cache(
+            dataset_name=config.dataset_name,
+            split=config.eval_split,
+            cache_dir=config.cache_dir,
+            max_examples=num_samples,
+            max_seq_length=config.max_seq_length,
+            doc_stride=config.doc_stride,
+            max_n_segs=None,
+            tokenizer=trainer.tokenizer,
         )
 
-        print(f"✅ Loaded {len(eval_features)} features")
+        print(f"✅ Loaded dataset with {len(eval_dataset)} features")
 
         # Make predictions on a few samples
         print("\n🎯 Making predictions...")
         trainer.model.eval()
 
+        samples_to_check = min(num_samples, len(eval_dataset))
+
         with torch.no_grad():
-            for i, feature in enumerate(eval_features[:num_samples]):
-                # Convert feature to tensors
-                input_ids = torch.tensor([feature["input_ids"]]).to(trainer.device)
-                attention_mask = torch.tensor([feature["attention_mask"]]).to(trainer.device)
-                token_type_ids = torch.tensor([feature.get("token_type_ids", [0] * len(feature["input_ids"]))]).to(
-                    trainer.device
-                )
+            for i in range(samples_to_check):
+                # Get feature from dataset
+                feature = eval_dataset[i]
+
+                # Convert feature to tensors (handle both dict and tensor inputs)
+                if isinstance(feature["input_ids"], torch.Tensor):
+                    input_ids = feature["input_ids"].unsqueeze(0).to(trainer.device)
+                    attention_mask = feature["attention_mask"].unsqueeze(0).to(trainer.device)
+                    token_type_ids = (
+                        feature["token_type_ids"].unsqueeze(0).to(trainer.device)
+                        if "token_type_ids" in feature
+                        else torch.zeros_like(input_ids)
+                    )
+                else:
+                    input_ids = torch.tensor([feature["input_ids"]]).to(trainer.device)
+                    attention_mask = torch.tensor([feature["attention_mask"]]).to(trainer.device)
+                    token_type_ids = torch.tensor(
+                        [feature.get("token_type_ids", [0] * len(feature["input_ids"]))]
+                    ).to(trainer.device)
 
                 # Get model outputs
                 if hasattr(trainer.model, "get_initial_memory"):
@@ -139,6 +156,13 @@ def debug_model_predictions(model_path: str, num_samples: int = 10):
                 print(f"   No-answer score (CLS@{cls_idx}): {no_answer_score:.4f}")
                 print(f"   Score difference: {best_score - no_answer_score:.4f}")
                 print(f"   Predicted text: '{answer_text}'")
+
+                # Show ground truth if available
+                if "chosen_answer_text" in feature:
+                    gt_answer = feature["chosen_answer_text"]
+                    print(f"   Ground truth: '{gt_answer}'")
+                    match = "✅ MATCH!" if answer_text.strip().lower() == gt_answer.strip().lower() else "❌ MISMATCH"
+                    print(f"   {match}")
 
                 # Show some logit statistics
                 print(
