@@ -71,6 +71,55 @@ def metric_max_over_ground_truths(metric_fn, prediction, ground_truths):
     return max(scores_for_ground_truths)
 
 
+def find_best_threshold(predictions_with_scores, references, thresholds=None):
+    """
+    Find the best no-answer threshold by trying multiple values.
+
+    Args:
+        predictions_with_scores: Dict mapping qid to (prediction, score_diff)
+        references: Dict with question_ids as keys and reference data as values
+        thresholds: List of thresholds to try (default: -3.0 to 3.0 in steps of 0.1)
+
+    Returns:
+        Dict with best_threshold, best_f1, and best_exact
+    """
+    if thresholds is None:
+        thresholds = [i * 0.1 for i in range(-30, 31)]  # -3.0 to 3.0 in steps of 0.1
+
+    best_f1 = 0.0
+    best_exact = 0.0
+    best_f1_threshold = 0.0
+    best_exact_threshold = 0.0
+
+    for threshold in thresholds:
+        # Apply threshold to predictions
+        thresholded_predictions = {}
+        for qid, (pred, score_diff) in predictions_with_scores.items():
+            # If score_diff < threshold, predict no-answer
+            if score_diff < threshold:
+                thresholded_predictions[qid] = ""
+            else:
+                thresholded_predictions[qid] = pred
+
+        # Evaluate with this threshold
+        metrics = evaluate_squad_v2(thresholded_predictions, references)
+
+        if metrics["f1"] > best_f1:
+            best_f1 = metrics["f1"]
+            best_f1_threshold = threshold
+
+        if metrics["exact"] > best_exact:
+            best_exact = metrics["exact"]
+            best_exact_threshold = threshold
+
+    return {
+        "best_f1": best_f1,
+        "best_f1_threshold": best_f1_threshold,
+        "best_exact": best_exact,
+        "best_exact_threshold": best_exact_threshold,
+    }
+
+
 def evaluate_squad_v2(predictions, references, no_answer_threshold=0.0):
     """
     Evaluate SQuAD v2 predictions with official metrics.
@@ -78,7 +127,7 @@ def evaluate_squad_v2(predictions, references, no_answer_threshold=0.0):
     Args:
         predictions: Dict with question_ids as keys and predictions as values
         references: Dict with question_ids as keys and reference data as values
-        no_answer_threshold: Threshold for no-answer predictions
+        no_answer_threshold: Threshold for no-answer predictions (not used, kept for compatibility)
 
     Returns:
         Dict with evaluation metrics
@@ -857,7 +906,8 @@ class XLNetRecurrentTrainer:
         no_answer_threshold: float = 0.0,
         max_answer_length: int = 30,
         n_best_size: int = 20,
-    ) -> dict[str, str]:
+        return_score_diff: bool = False,
+    ) -> dict[str, str | tuple[str, float]]:
         """
         Extract predictions from start and end logits using recurrent memory approach.
 
@@ -938,20 +988,26 @@ class XLNetRecurrentTrainer:
                 # NEW APPROACH: "Any Positive" Logic
                 # If ANY segment confidently predicts an answer, use it
                 # Only predict no-answer when ALL segments predict no-answer
-                predictions[example_id] = self._extract_prediction_any_positive(
-                    example_id, example_logits, no_answer_threshold, max_answer_length
+                result = self._extract_prediction_any_positive(
+                    example_id, example_logits, no_answer_threshold, max_answer_length, return_score_diff
                 )
             else:
                 # ORIGINAL APPROACH: Best score across all segments
-                predictions[example_id] = self._extract_prediction_best_score(
-                    example_id, example_logits, no_answer_threshold, max_answer_length
+                result = self._extract_prediction_best_score(
+                    example_id, example_logits, no_answer_threshold, max_answer_length, return_score_diff
                 )
+            predictions[example_id] = result
 
         return predictions
 
     def _extract_prediction_any_positive(
-        self, example_id: str, example_logits: list[dict], no_answer_threshold: float, max_answer_length: int
-    ) -> str:
+        self,
+        example_id: str,
+        example_logits: list[dict],
+        no_answer_threshold: float,
+        max_answer_length: int,
+        return_score_diff: bool = False,
+    ) -> str | tuple[str, float]:
         """Extract prediction using 'any positive' logic for multi-segment documents."""
         confident_answer_candidates = []
         segment_decisions = []
@@ -1097,20 +1153,38 @@ class XLNetRecurrentTrainer:
             # Choose the best answer among confident predictions
             confident_answer_candidates.sort(key=lambda x: x["score"], reverse=True)
             best_answer_text = str(confident_answer_candidates[0]["text"])
+            best_answer_score = confident_answer_candidates[0]["score"]
+
+            # Calculate best no-answer score across all segments
+            max_no_answer_score = max(d["no_answer_score"] for d in segment_decisions)
+            score_diff = best_answer_score - max_no_answer_score
 
             logger.debug(
                 f"Document {example_id}: ANSWER from segment {confident_answer_candidates[0]['chunk_idx']} "
-                f"(score={confident_answer_candidates[0]['score']:.3f}): '{best_answer_text[:50]}...'"
+                f"(score={best_answer_score:.3f}, score_diff={score_diff:.3f}): '{best_answer_text[:50]}...'"
             )
-            return best_answer_text
+
+            if return_score_diff:
+                return (best_answer_text, score_diff)
+            else:
+                return best_answer_text
         else:
             # ALL segments predict no-answer
             logger.debug(f"Document {example_id}: NO ANSWER (all {len(segment_decisions)} segments predict no-answer)")
-            return ""
+            if return_score_diff:
+                # Negative score diff means no-answer is preferred
+                return ("", -10.0)
+            else:
+                return ""
 
     def _extract_prediction_best_score(
-        self, example_id: str, example_logits: list[dict], no_answer_threshold: float, max_answer_length: int
-    ) -> str:
+        self,
+        example_id: str,
+        example_logits: list[dict],
+        no_answer_threshold: float,
+        max_answer_length: int,
+        return_score_diff: bool = False,
+    ) -> str | tuple[str, float]:
         """Extract prediction using original 'best score' logic (for comparison)."""
         # Find best answer span across all chunks for this document
         best_score = None
@@ -1197,15 +1271,27 @@ class XLNetRecurrentTrainer:
             best_score = best_candidate["score"]
             best_answer = best_candidate["text"]
 
+        # Calculate score difference
+        if best_score is not None and no_answer_score is not None:
+            score_diff = best_score - no_answer_score
+        else:
+            score_diff = -10.0 if not best_answer else 10.0
+
         # Decide between best answer and no answer
         if (
             no_answer_score is not None
             and best_score is not None
             and no_answer_score > best_score + no_answer_threshold
         ):
-            return ""
+            if return_score_diff:
+                return ("", score_diff)
+            else:
+                return ""
         else:
-            return best_answer if best_answer else ""
+            if return_score_diff:
+                return (best_answer if best_answer else "", score_diff)
+            else:
+                return best_answer if best_answer else ""
 
     def get_references_from_dataset(self, dataset) -> dict[str, dict[str, Any]]:
         """Extract reference answers from the dataset for evaluation."""
@@ -1329,23 +1415,60 @@ class XLNetRecurrentTrainer:
 
                 logger.info(f"✅ Extracted {len(predictions)} predictions")
 
+                # Analyze prediction distribution
+                # Note: predictions could be dict[str, str] or dict[str, tuple[str, float]]
+                # but here we know it's dict[str, str] since return_score_diff=False (default)
+                empty_predictions = sum(
+                    1 for p in predictions.values() if (p == "" if isinstance(p, str) else p[0] == "")
+                )
+                non_empty_predictions = len(predictions) - empty_predictions
+                logger.info("📊 Prediction distribution:")
+                logger.info(
+                    f"   - Empty (no-answer): {empty_predictions} ({100 * empty_predictions / len(predictions):.1f}%)"
+                )
+                logger.info(
+                    f"   - Non-empty (has-answer): {non_empty_predictions} ({100 * non_empty_predictions / len(predictions):.1f}%)"
+                )
+
                 # Get reference answers
                 logger.info("📚 Loading reference answers...")
                 references = self.get_references_from_dataset(dataset)
 
                 logger.info(f"✅ Loaded {len(references)} reference answers")
 
+                # Analyze ground truth distribution
+                has_answer_refs = sum(1 for r in references.values() if r["answers"] and r["answers"][0] != "")
+                no_answer_refs = len(references) - has_answer_refs
+                logger.info("📊 Ground truth distribution:")
+                logger.info(f"   - Has answer: {has_answer_refs} ({100 * has_answer_refs / len(references):.1f}%)")
+                logger.info(f"   - No answer: {no_answer_refs} ({100 * no_answer_refs / len(references):.1f}%)")
+
                 # Print some sample predictions for debugging
-                sample_predictions = list(predictions.items())[:3]
-                for example_id, pred in sample_predictions:
-                    logger.info(f"Sample prediction - ID: {example_id}, Prediction: '{pred}'")
+                sample_predictions = list(predictions.items())[:5]
+                logger.info("📝 Sample predictions:")
+                for example_id, pred_value in sample_predictions:
+                    # Handle both str and tuple[str, float] cases
+                    pred = pred_value if isinstance(pred_value, str) else pred_value[0]
+                    pred_display = pred[:80] + "..." if len(pred) > 80 else pred
+                    pred_display = pred_display if pred else "[EMPTY/NO-ANSWER]"
+                    logger.info(f"  ID: {example_id}")
+                    logger.info(f"    Prediction: {pred_display}")
                     if example_id in references:
                         ref_answers = references[example_id]["answers"]
-                        logger.info(f"                   - Ground truth: {ref_answers}")
+                        ref_display = (
+                            ref_answers[0][:80] + "..."
+                            if ref_answers and len(ref_answers[0]) > 80
+                            else (ref_answers[0] if ref_answers else "[NO-ANSWER]")
+                        )
+                        logger.info(f"    Ground truth: {ref_display}")
 
                 # Calculate SQuAD v2 metrics
                 logger.info("🧮 Calculating SQuAD v2 metrics...")
-                squad_metrics = evaluate_squad_v2(predictions, references)
+                # Ensure predictions are strings (extract from tuple if needed)
+                predictions_str: dict[str, str] = {
+                    qid: (pred if isinstance(pred, str) else pred[0]) for qid, pred in predictions.items()
+                }
+                squad_metrics = evaluate_squad_v2(predictions_str, references)
                 metrics.update(squad_metrics)
 
                 logger.info("✅ Evaluation complete:")

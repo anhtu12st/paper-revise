@@ -48,8 +48,8 @@ def create_base_config():
         "eval_split": "validation",
         "cache_dir": "./.cache_comparison",
         # Moderate dataset size for thorough testing
-        "max_train_samples": 1000,
-        "max_eval_samples": 200,
+        "max_train_samples": 5000,
+        "max_eval_samples": 500,
         "use_lazy_loading": False,
         "progressive_segments": [2],
         "max_n_segs": 2,
@@ -58,7 +58,7 @@ def create_base_config():
         "memory_init": "learned",
         "use_global_softmax": True,
         # Training settings
-        "num_epochs": 2,
+        "num_epochs": 4,
         "train_batch_size": 4,
         "eval_batch_size": 4,
         "learning_rate": 3e-5,
@@ -66,11 +66,11 @@ def create_base_config():
         "warmup_ratio": 0.1,
         "max_grad_norm": 1.0,
         "gradient_accumulation_steps": 1,
-        "eval_steps": 50,  # Eval every 50 steps
+        "eval_steps": 100,  # Eval every 100 steps
         "save_steps": 500,
         "logging_steps": 25,
         "save_total_limit": 2,
-        "no_answer_threshold": 1.5,
+        "no_answer_threshold": 0.0,  # Start with 0.0 to allow all predictions
         "use_any_positive_logic": True,
         "device": device,
         "fp16": has_cuda,
