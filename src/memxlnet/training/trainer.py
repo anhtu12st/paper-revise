@@ -745,8 +745,6 @@ class XLNetRecurrentTrainer:
                 start_positions = batch["start_positions"].to(self.device)
                 end_positions = batch["end_positions"].to(self.device)
                 document_mask = batch["document_mask"].to(self.device)
-                print("="*100)
-                print(input_ids)
 
                 # Build memory_state tensor per batch ordering
                 memory_states = []
