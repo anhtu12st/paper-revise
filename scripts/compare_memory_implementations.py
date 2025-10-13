@@ -66,9 +66,9 @@ def create_base_config():
         "warmup_ratio": 0.1,
         "max_grad_norm": 1.0,
         "gradient_accumulation_steps": 1,
-        "eval_steps": 5000,  # Eval every 100 steps
-        "save_steps": 5000,
-        "logging_steps": 25,
+        "eval_steps": 250,  # Eval every 250 steps (~20% of epoch, ~20 times during training)
+        "save_steps": 1250,  # Save every epoch
+        "logging_steps": 100,
         "save_total_limit": 2,
         "no_answer_threshold": 0.0,  # Start with 0.0 to allow all predictions
         "use_any_positive_logic": True,
@@ -95,8 +95,10 @@ def train_with_config(config, implementation_name):
 
         training_time = time.time() - start_time
 
-        # Get final metrics
-        metrics = trainer.best_metrics if hasattr(trainer, "best_metrics") else {}
+        # Run explicit final evaluation to get metrics
+        logger.info("🔍 Running final evaluation...")
+        _, eval_dataloader, eval_dataset = trainer.prepare_data()
+        metrics = trainer.evaluate(eval_dataloader, eval_dataset)
 
         result = {
             "status": "success",
