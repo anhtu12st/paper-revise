@@ -204,6 +204,9 @@ class SquadLikeQADataset(Dataset):
         answers = example["answers"]
         gold_candidates: list[tuple[str, int]] = list(zip(answers.get("text", []), answers.get("answer_start", [])))
 
+        # Store all valid answers for evaluation (SQuAD v2 validation has multiple valid answers)
+        all_valid_answers: list[str] = [normalize_unicode(text) for text in answers.get("text", [])]
+
         for i in range(num_segments):
             input_ids = tokenized["input_ids"][i]
             attention_mask = tokenized["attention_mask"][i]
@@ -345,6 +348,7 @@ class SquadLikeQADataset(Dataset):
                 "has_answer": has_answer,
                 "chosen_answer_text": chosen_answer_text,
                 "chosen_answer_char_span": chosen_answer_char_span,
+                "all_valid_answers": all_valid_answers,  # NEW: All valid ground truth answers
             }
             if boundary_info is not None:
                 feature["boundary_info"] = boundary_info
@@ -397,6 +401,7 @@ class SquadLikeQADataset(Dataset):
             "has_answer",
             "chosen_answer_text",
             "chosen_answer_char_span",
+            "all_valid_answers",  # NEW: All valid ground truth answers
             "boundary_info",
         ]
         for key in metadata_keys:
@@ -968,6 +973,7 @@ def _memory_aware_collate_fn(batch, memory_collate_config: MemoryCollateConfig |
         "has_answer",
         "chosen_answer_text",
         "chosen_answer_char_span",
+        "all_valid_answers",  # NEW: All valid ground truth answers
         "boundary_info",
     ]
     for key in metadata_keys:
@@ -1109,6 +1115,7 @@ class LazySquadLikeQADataset(Dataset):
             "has_answer",
             "chosen_answer_text",
             "chosen_answer_char_span",
+            "all_valid_answers",  # NEW: All valid ground truth answers
             "boundary_info",
         ]
         for key in metadata_keys:
@@ -1276,6 +1283,8 @@ class TimeStepMajorDataLoader:
                     padding[key] = ""
                 elif key == "chosen_answer_char_span":
                     padding[key] = [-1, -1]
+                elif key == "all_valid_answers":
+                    padding[key] = []
                 elif key == "boundary_info":
                     padding[key] = None
                 elif key == "cls_index":

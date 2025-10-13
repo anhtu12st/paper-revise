@@ -1301,23 +1301,79 @@ class XLNetRecurrentTrainer:
                 return best_answer if best_answer else ""
 
     def get_references_from_dataset(self, dataset) -> dict[str, dict[str, Any]]:
-        """Extract reference answers from the dataset for evaluation."""
+        """Extract reference answers from the dataset for evaluation.
+
+        IMPORTANT: This function now maps references using the preprocessed dataset's
+        internal IDs (doc_0, doc_1, etc.) to match the prediction IDs. Previously,
+        it used SQuAD's original IDs which caused 0% F1 due to ID mismatch.
+
+        This function tries two approaches:
+        1. First, try to extract answers from preprocessed features (if available)
+        2. Fallback to reloading raw SQuAD dataset
+        """
         references = {}
 
+        # Option 1: Try to get answers from preprocessed features (preferred)
+        # This uses the all_valid_answers field if available
+        try:
+            logger.info("📊 Attempting to extract references from preprocessed features...")
+
+            # Get all document IDs from dataset
+            if hasattr(dataset, 'get_all_documents'):
+                document_ids = dataset.get_all_documents()
+
+                for doc_id in document_ids:
+                    # Get first segment for this document
+                    segments = dataset.get_document_segments(doc_id)
+                    if segments:
+                        first_segment_idx = segments[0]
+                        first_segment = dataset[first_segment_idx]
+
+                        # Check if all_valid_answers is available
+                        if "all_valid_answers" in first_segment and first_segment["all_valid_answers"]:
+                            references[doc_id] = {
+                                "answers": first_segment["all_valid_answers"],
+                                "question": first_segment.get("question", ""),
+                                "context": first_segment.get("context", ""),
+                            }
+
+                if references:
+                    logger.info(f"✅ Extracted {len(references)} references from preprocessed features")
+                    return references
+                else:
+                    logger.info("⚠️  No all_valid_answers found in features, falling back to raw dataset")
+        except Exception as e:
+            logger.info(f"⚠️  Could not extract from features: {e}, falling back to raw dataset")
+
+        # Option 2: Fallback to loading raw SQuAD dataset
         try:
             # Load the original dataset to get ground truth answers
             from datasets import load_dataset
 
+            logger.info("📊 Loading references from raw SQuAD v2 dataset...")
             squad_dataset = load_dataset(self.config.dataset_name, split=self.config.eval_split)
 
-            for example in squad_dataset:
+            # ✅ FIX: Map using internal doc_idx to match prediction IDs
+            # The preprocessed dataset uses "doc_0", "doc_1", etc. as example_id
+            # Predictions are keyed by these internal IDs, not SQuAD's original IDs
+            for example_idx, example in enumerate(squad_dataset):
                 context = example["context"]
                 question = example["question"]
                 answers = example["answers"]["text"] if example["answers"]["text"] else [""]
-                example_id = example["id"]
+                original_squad_id = example["id"]
 
-                # Store reference data by example ID
-                references[example_id] = {"answers": answers, "question": question, "context": context}
+                # Use internal ID format to match predictions
+                internal_id = f"doc_{example_idx}"
+
+                # Store reference data by INTERNAL ID (not original SQuAD ID)
+                references[internal_id] = {
+                    "answers": answers,
+                    "question": question,
+                    "context": context,
+                    "original_squad_id": original_squad_id,  # Keep for reference
+                }
+
+            logger.info(f"✅ Loaded {len(references)} references from raw dataset")
 
         except Exception as e:
             logger.warning(f"Could not load ground truth dataset: {e}")
@@ -1445,6 +1501,25 @@ class XLNetRecurrentTrainer:
                 references = self.get_references_from_dataset(dataset)
 
                 logger.info(f"✅ Loaded {len(references)} reference answers")
+
+                # ✅ DIAGNOSTIC: Verify ID matching
+                sample_pred_ids = list(predictions.keys())[:3]
+                sample_ref_ids = list(references.keys())[:3]
+                logger.info("🔍 ID Matching Verification:")
+                logger.info(f"   Sample prediction IDs: {sample_pred_ids}")
+                logger.info(f"   Sample reference IDs: {sample_ref_ids}")
+
+                # Check how many predictions have matching references
+                matched_ids = sum(1 for pred_id in predictions.keys() if pred_id in references)
+                match_rate = 100 * matched_ids / len(predictions) if predictions else 0
+                logger.info(
+                    f"   ID match rate: {matched_ids}/{len(predictions)} ({match_rate:.1f}%)"
+                )
+
+                if match_rate < 50:
+                    logger.warning(
+                        "⚠️  LOW ID MATCH RATE! Predictions and references may be using different ID schemes."
+                    )
 
                 # Analyze ground truth distribution
                 has_answer_refs = sum(1 for r in references.values() if r["answers"] and r["answers"][0] != "")

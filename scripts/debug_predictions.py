@@ -11,16 +11,38 @@ Usage:
 """
 
 import logging
+import re
+import string
 import sys
 from pathlib import Path
 
 import torch
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+from memxlnet.data.dataset import create_dataset_from_cache
 from memxlnet.training import TrainingConfig, XLNetRecurrentTrainer
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
+
+
+def normalize_answer(s):
+    """Normalize answer text for comparison (same as SQuAD evaluation)."""
+
+    def remove_articles(text):
+        return re.sub(r"\b(a|an|the)\b", " ", text)
+
+    def white_space_fix(text):
+        return " ".join(text.split())
+
+    def remove_punc(text):
+        exclude = set(string.punctuation)
+        return "".join(ch for ch in text if ch not in exclude)
+
+    def lower(text):
+        return text.lower()
+
+    return white_space_fix(remove_articles(remove_punc(lower(s))))
 
 
 def debug_model_predictions(model_path: str, num_samples: int = 10):
@@ -36,7 +58,7 @@ def debug_model_predictions(model_path: str, num_samples: int = 10):
     try:
         # Create a minimal config to load the model
         config = TrainingConfig(
-            model_name="xlnet-base-cased",
+            model_name=model_path,
             max_seq_length=384,
             doc_stride=64,
             dataset_name="squad_v2",
@@ -54,22 +76,8 @@ def debug_model_predictions(model_path: str, num_samples: int = 10):
 
         trainer = XLNetRecurrentTrainer(config)
 
-        # Try to load checkpoint
-        checkpoint_path = Path(model_path) / "checkpoint-best"
-        if not checkpoint_path.exists():
-            checkpoint_path = Path(model_path) / "checkpoint-final"
-
-        if checkpoint_path.exists():
-            print(f"✅ Loading checkpoint from: {checkpoint_path}")
-            checkpoint = torch.load(checkpoint_path / "pytorch_model.bin", map_location=trainer.device)
-            trainer.model.load_state_dict(checkpoint)
-        else:
-            print("⚠️  No checkpoint found, using freshly initialized model")
-            print("   (Predictions will be random)")
-
         # Prepare evaluation data - FIXED: Use create_dataset_from_cache
         print(f"\n📚 Loading {num_samples} evaluation samples...")
-        from memxlnet.data.dataset import create_dataset_from_cache
 
         # Disable Hub dataset to use local processing
         eval_dataset = create_dataset_from_cache(
@@ -156,7 +164,9 @@ def debug_model_predictions(model_path: str, num_samples: int = 10):
                     is_context_span = token_type_ids_list[best_start_idx] == 1 and token_type_ids_list[best_end_idx] == 1
 
                 # Extract using offsets if available
-                if offset_mapping and best_start_idx < len(offset_mapping) and best_end_idx < len(offset_mapping) and context:
+                if best_start_idx == cls_idx or best_end_idx == cls_idx:
+                    answer_text = ""  # No-answer prediction
+                elif offset_mapping and best_start_idx < len(offset_mapping) and best_end_idx < len(offset_mapping) and context:
                     start_char = offset_mapping[best_start_idx][0]
                     end_char = offset_mapping[best_end_idx][1]
                     if start_char < end_char and end_char <= len(context):
@@ -182,11 +192,33 @@ def debug_model_predictions(model_path: str, num_samples: int = 10):
                 print(f"   Score difference: {best_score - no_answer_score:.4f}")
                 print(f"   Predicted text: '{answer_text[:200]}{'...' if len(answer_text) > 200 else ''}'")
 
-                # Show ground truth if available
-                if "chosen_answer_text" in feature:
+                # Show ground truth if available - compare against ALL valid answers (SQuAD v2)
+                if "all_valid_answers" in feature and feature["all_valid_answers"]:
+                    # SQuAD v2 validation has multiple valid answers
+                    all_gt_answers = feature["all_valid_answers"]
+                    print(f"   Ground truth answers ({len(all_gt_answers)}): {all_gt_answers}")
+
+                    # Check if prediction matches ANY valid answer (with proper normalization)
+                    normalized_pred = normalize_answer(answer_text)
+                    matches = []
+                    for idx, gt_answer in enumerate(all_gt_answers):
+                        if normalized_pred == normalize_answer(gt_answer):
+                            matches.append(idx)
+
+                    if matches:
+                        matched_answers = [all_gt_answers[i] for i in matches]
+                        print(f"   ✅ MATCH! (matches answer(s): {matched_answers})")
+                    else:
+                        print(f"   ❌ MISMATCH (doesn't match any of {len(all_gt_answers)} valid answers)")
+                        print(f"      Normalized prediction: '{normalized_pred}'")
+                        print(f"      Normalized GT answers: {[normalize_answer(a) for a in all_gt_answers]}")
+                elif "chosen_answer_text" in feature:
+                    # Fallback to single answer (training data or old cache)
                     gt_answer = feature["chosen_answer_text"]
                     print(f"   Ground truth: '{gt_answer}'")
-                    match = "✅ MATCH!" if answer_text.strip().lower() == gt_answer.strip().lower() else "❌ MISMATCH"
+                    normalized_pred = normalize_answer(answer_text)
+                    normalized_gt = normalize_answer(gt_answer)
+                    match = "✅ MATCH!" if normalized_pred == normalized_gt else "❌ MISMATCH"
                     print(f"   {match}")
 
                 # Show some logit statistics
