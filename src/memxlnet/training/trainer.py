@@ -1384,12 +1384,15 @@ class XLNetRecurrentTrainer:
         logger.info(f"📊 Example IDs sample: {all_example_ids[:5] if all_example_ids else 'None'}")
 
         # Debug: Check for consistency in collected data
-        logger.debug("Collected data lengths:")
-        logger.debug(f"  Start logits: {len(all_start_logits)}")
-        logger.debug(f"  End logits: {len(all_end_logits)}")
-        logger.debug(f"  Example IDs: {len(all_example_ids)}")
-        logger.debug(f"  Offset mappings: {len(all_offset_mappings)}")
-        logger.debug(f"  Contexts: {len(all_contexts)}")
+        logger.info("📊 Collected data lengths:")
+        logger.info(f"  Start logits: {len(all_start_logits)}")
+        logger.info(f"  End logits: {len(all_end_logits)}")
+        logger.info(f"  Example IDs: {len(all_example_ids)}")
+        logger.info(f"  Offset mappings: {len(all_offset_mappings)}")
+        logger.info(f"  Contexts: {len(all_contexts)}")
+        logger.info(f"  Input IDs: {len(all_input_ids) if all_input_ids else 'Not collected'}")
+        logger.info(f"  Token type IDs: {len(all_token_type_ids) if all_token_type_ids else 'Not collected'}")
+        logger.info(f"  CLS indices: {len(all_cls_indices) if all_cls_indices else 'Not collected'}")
 
         # If we have the dataset, calculate SQuAD v2 metrics
         if dataset is not None and all_start_logits:
@@ -1582,13 +1585,14 @@ class XLNetRecurrentTrainer:
                     act_list = active.tolist()
                     doc_example_ids.extend([example_ids[i] for i, a in enumerate(act_list) if a])
                     # Get metadata, handling both Tensor and list types
-                    offsets_raw: Any = chunk.get("offset_mappings", [])
+                    # Fixed: use singular form to match collate function
+                    offsets_raw: Any = chunk.get("offset_mapping", [])
                     chunk_offsets: list[Any] = (
                         offsets_raw.tolist()
                         if isinstance(offsets_raw, torch.Tensor)
                         else (offsets_raw if isinstance(offsets_raw, list) else [])
                     )
-                    contexts_raw: Any = chunk.get("contexts", [])
+                    contexts_raw: Any = chunk.get("context", [])
                     chunk_contexts: list[str] = (
                         contexts_raw.tolist()
                         if isinstance(contexts_raw, torch.Tensor)
