@@ -196,10 +196,10 @@ class SquadLikeQADataset(Dataset):
 
         features: list[dict[str, Any]] = []
 
-        # Respect segment cap
+        # Process all segments (no truncation at preprocessing time)
+        # max_n_segs will be applied at dataloader level for progressive training
         num_segments = len(tokenized["input_ids"])
-        if max_n_segs is not None:
-            num_segments = min(num_segments, max_n_segs)
+        # Note: max_n_segs parameter kept for backward compatibility but not used for truncation
 
         answers = example["answers"]
         gold_candidates: list[tuple[str, int]] = list(zip(answers.get("text", []), answers.get("answer_start", [])))
@@ -348,7 +348,9 @@ class SquadLikeQADataset(Dataset):
                 "has_answer": has_answer,
                 "chosen_answer_text": chosen_answer_text,
                 "chosen_answer_char_span": chosen_answer_char_span,
-                "all_valid_answers": all_valid_answers,  # NEW: All valid ground truth answers
+                "all_valid_answers": all_valid_answers,  # All valid ground truth answers
+                "segment_index_in_doc": i,  # Position of this segment within the document
+                "has_answer_in_segment": (start_positions != cls_index),  # True if this segment contains the answer
             }
             if boundary_info is not None:
                 feature["boundary_info"] = boundary_info
@@ -401,7 +403,9 @@ class SquadLikeQADataset(Dataset):
             "has_answer",
             "chosen_answer_text",
             "chosen_answer_char_span",
-            "all_valid_answers",  # NEW: All valid ground truth answers
+            "all_valid_answers",  # All valid ground truth answers
+            "segment_index_in_doc",  # Position within document (for segment selection)
+            "has_answer_in_segment",  # Whether this segment contains the answer
             "boundary_info",
         ]
         for key in metadata_keys:
@@ -409,6 +413,167 @@ class SquadLikeQADataset(Dataset):
                 item[key] = feature[key]
 
         return item
+
+
+class SegmentSelector:
+    """Intelligent segment selection for progressive training.
+
+    This class implements smart segment selection strategies for training with variable
+    numbers of segments. Instead of always using the first N segments, it can:
+    - Center answer segments for answerable questions
+    - Use random continuous segments for unanswerable questions
+    - Provide reproducible selection with seeds
+
+    This ensures the model sees answers at various document positions during training,
+    leading to more robust long-context understanding.
+    """
+
+    def select_segments_for_document(
+        self,
+        all_segments: list[int],
+        dataset: Any,
+        n_segments: int,
+        strategy: str = "answer_centered",
+        epoch_seed: int | None = None,
+    ) -> list[int]:
+        """Select N continuous segments from a document using specified strategy.
+
+        Args:
+            all_segments: List of all segment indices for this document
+            dataset: Dataset instance (to access segment features)
+            n_segments: Number of segments to select
+            strategy: Selection strategy:
+                - "answer_centered": Place answer segment near middle (default)
+                - "random_continuous": Random N continuous segments
+                - "first_n": Original behavior (first N segments)
+            epoch_seed: Random seed for reproducibility (fixed per epoch)
+
+        Returns:
+            List of selected segment indices (continuous, length = min(n_segments, len(all_segments)))
+
+        Example:
+            >>> selector = SegmentSelector()
+            >>> # Document with 34 segments, answer in segment 15
+            >>> selected = selector.select_segments_for_document(
+            ...     all_segments=list(range(34)),
+            ...     dataset=my_dataset,
+            ...     n_segments=4,
+            ...     strategy="answer_centered",
+            ... )
+            >>> # Returns [13, 14, 15, 16] - answer at position 2/4
+        """
+        total_segments = len(all_segments)
+
+        # If document has <= n_segments, return all
+        if total_segments <= n_segments:
+            return all_segments
+
+        if strategy == "first_n":
+            # Original behavior: first N segments
+            return all_segments[:n_segments]
+
+        elif strategy == "answer_centered":
+            # Find answer segment
+            answer_segment_idx = self._find_answer_segment(all_segments, dataset)
+
+            if answer_segment_idx is None:
+                # No answer: use random continuous
+                return self._random_continuous_segments(
+                    all_segments, n_segments, epoch_seed
+                )
+
+            # Center answer segment in selection
+            return self._center_segments_around(
+                all_segments, n_segments, answer_segment_idx
+            )
+
+        elif strategy == "random_continuous":
+            return self._random_continuous_segments(
+                all_segments, n_segments, epoch_seed
+            )
+
+        else:
+            raise ValueError(f"Unknown segment selection strategy: {strategy}")
+
+    def _find_answer_segment(self, segments: list[int], dataset: Any) -> int | None:
+        """Find which segment contains the answer.
+
+        Args:
+            segments: List of segment indices
+            dataset: Dataset instance to access features
+
+        Returns:
+            Index in segments list where answer is found, or None if no answer
+        """
+        for seg_idx in segments:
+            feature = dataset.features[seg_idx]
+            # Check if this segment has the answer
+            start_pos = feature.get("start_positions")
+            cls_idx = feature.get("cls_index", 0)
+
+            # Convert tensor to int if needed
+            if isinstance(start_pos, torch.Tensor):
+                start_pos = start_pos.item()
+
+            # Answer is in segment if start_positions != cls_index
+            if start_pos != cls_idx:
+                return segments.index(seg_idx)
+
+        return None
+
+    def _center_segments_around(
+        self, segments: list[int], n: int, center_idx: int
+    ) -> list[int]:
+        """Select N segments with center_idx near the middle.
+
+        Args:
+            segments: All available segment indices
+            n: Number of segments to select
+            center_idx: Index in segments list to center around
+
+        Returns:
+            N continuous segments with center_idx near middle
+
+        Example:
+            >>> # Answer at position 15 of 34, select 4 segments
+            >>> selector._center_segments_around(list(range(34)), 4, 15)
+            [13, 14, 15, 16]  # Answer at position 2/4
+        """
+        total = len(segments)
+
+        # Try to place answer at position n//2
+        target_pos = n // 2
+        start = max(0, center_idx - target_pos)
+
+        # Adjust if we'd go past the end
+        if start + n > total:
+            start = total - n
+
+        return segments[start : start + n]
+
+    def _random_continuous_segments(
+        self, segments: list[int], n: int, epoch_seed: int | None
+    ) -> list[int]:
+        """Select N random continuous segments.
+
+        Args:
+            segments: All available segment indices
+            n: Number of segments to select
+            epoch_seed: Random seed for reproducibility
+
+        Returns:
+            N continuous segments starting from random position
+        """
+        import random
+
+        if epoch_seed is not None:
+            random.seed(epoch_seed)
+
+        total = len(segments)
+        max_start = total - n
+        start = random.randint(0, max_start)
+
+        return segments[start : start + n]
 
 
 class ChunkedCacheManager:
@@ -973,7 +1138,9 @@ def _memory_aware_collate_fn(batch, memory_collate_config: MemoryCollateConfig |
         "has_answer",
         "chosen_answer_text",
         "chosen_answer_char_span",
-        "all_valid_answers",  # NEW: All valid ground truth answers
+        "all_valid_answers",  # All valid ground truth answers
+        "segment_index_in_doc",  # Position within document (for segment selection)
+        "has_answer_in_segment",  # Whether this segment contains the answer
         "boundary_info",
     ]
     for key in metadata_keys:
@@ -1115,7 +1282,9 @@ class LazySquadLikeQADataset(Dataset):
             "has_answer",
             "chosen_answer_text",
             "chosen_answer_char_span",
-            "all_valid_answers",  # NEW: All valid ground truth answers
+            "all_valid_answers",  # All valid ground truth answers
+            "segment_index_in_doc",  # Position within document (for segment selection)
+            "has_answer_in_segment",  # Whether this segment contains the answer
             "boundary_info",
         ]
         for key in metadata_keys:
@@ -1170,19 +1339,31 @@ class TimeStepMajorDataLoader:
         batch_size: int,
         shuffle: bool = False,
         max_segments: int | None = None,
+        segment_selection_strategy: str = "answer_centered",
+        epoch_seed: int | None = None,
     ):
-        """Initialize time-step-major dataloader.
+        """Initialize time-step-major dataloader with smart segment selection.
 
         Args:
             dataset: SquadLikeQADataset or LazySquadLikeQADataset with document tracking
             batch_size: Number of documents to process simultaneously
             shuffle: Whether to shuffle document order
             max_segments: Maximum segments per document (None for all)
+            segment_selection_strategy: Strategy for selecting segments:
+                - "answer_centered": Center answer segment (default)
+                - "random_continuous": Random continuous segments
+                - "first_n": Use first N segments (original behavior)
+            epoch_seed: Random seed for reproducible segment selection (fixed per epoch)
         """
         self.dataset = dataset
         self.batch_size = batch_size
         self.shuffle = shuffle
         self.max_segments = max_segments
+        self.segment_selection_strategy = segment_selection_strategy
+        self.epoch_seed = epoch_seed
+
+        # Create segment selector
+        self.segment_selector = SegmentSelector()
 
         # Organize documents by segment count
         self.documents = dataset.get_all_documents()
@@ -1194,8 +1375,8 @@ class TimeStepMajorDataLoader:
             self.document_segments[doc_id] = segments
             self.max_doc_segments = max(self.max_doc_segments, len(segments))
 
-        if self.max_segments:
-            self.max_doc_segments = min(self.max_doc_segments, self.max_segments)
+        # Note: We don't truncate max_doc_segments here anymore
+        # Segment selection will happen dynamically in __iter__
 
     def __iter__(self):
         documents = self.documents.copy()
@@ -1208,20 +1389,44 @@ class TimeStepMajorDataLoader:
         for batch_start in range(0, len(documents), self.batch_size):
             batch_docs = documents[batch_start : batch_start + self.batch_size]
 
-            # Create time-step-major batches for this document batch
+            # Apply smart segment selection for each document in batch
+            selected_segments_map = {}
+            max_selected_segments = 0
+
+            for doc_id in batch_docs:
+                all_segments = self.document_segments[doc_id]
+
+                # Determine how many segments to select
+                n_segments = len(all_segments)
+                if self.max_segments is not None:
+                    n_segments = min(n_segments, self.max_segments)
+
+                # Select segments using configured strategy
+                selected = self.segment_selector.select_segments_for_document(
+                    all_segments=all_segments,
+                    dataset=self.dataset,
+                    n_segments=n_segments,
+                    strategy=self.segment_selection_strategy,
+                    epoch_seed=self.epoch_seed,
+                )
+
+                selected_segments_map[doc_id] = selected
+                max_selected_segments = max(max_selected_segments, len(selected))
+
+            # Create time-step-major batches using selected segments
             time_step_batches = []
 
-            for time_step in range(self.max_doc_segments):
+            for time_step in range(max_selected_segments):
                 step_batch = []
                 step_example_ids = []
                 step_document_mask = []
 
                 for doc_id in batch_docs:
-                    segments = self.document_segments[doc_id]
+                    selected_segments = selected_segments_map[doc_id]
 
-                    if time_step < len(segments):
+                    if time_step < len(selected_segments):
                         # This document has a segment at this time step
-                        feature_idx = segments[time_step]
+                        feature_idx = selected_segments[time_step]
                         feature = self.dataset[feature_idx]
                         step_batch.append(feature)
                         step_example_ids.append(doc_id)
@@ -1322,8 +1527,11 @@ def create_dataloader(
     num_workers: int,
     memory_collate_config: MemoryCollateConfig | None = None,
     use_time_step_major: bool = True,
+    max_segments: int | None = None,
+    segment_selection_strategy: str = "answer_centered",
+    epoch_seed: int | None = None,
 ) -> DataLoader[Any] | TimeStepMajorDataLoader:
-    """Create dataloader with optional time-step-major batching.
+    """Create dataloader with optional time-step-major batching and smart segment selection.
 
     This function creates different types of dataloaders based on the configuration:
     - TimeStepMajorDataLoader for MA-XLNet (memory-enabled training)
@@ -1338,6 +1546,12 @@ def create_dataloader(
         memory_collate_config: Configuration for memory token handling (only used for
                                regular DataLoader, ignored when use_time_step_major=True)
         use_time_step_major: Whether to use time-step-major batching (for MA-XLNet)
+        max_segments: Maximum segments per document (None for all)
+        segment_selection_strategy: Strategy for selecting segments:
+            - "answer_centered": Center answer segment (default)
+            - "random_continuous": Random continuous segments
+            - "first_n": Use first N segments (original behavior)
+        epoch_seed: Random seed for reproducible segment selection
 
     Returns:
         DataLoader instance (time-step-major or regular)
@@ -1365,7 +1579,9 @@ def create_dataloader(
             dataset=cast(SquadLikeQADataset | LazySquadLikeQADataset, dataset),
             batch_size=batch_size,
             shuffle=shuffle,
-            max_segments=None,  # Use all segments
+            max_segments=max_segments,
+            segment_selection_strategy=segment_selection_strategy,
+            epoch_seed=epoch_seed,
         )
     else:
         # Return regular dataloader

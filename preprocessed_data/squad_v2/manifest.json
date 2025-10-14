@@ -4,9 +4,10 @@
     "chunk_size": 1000,
     "max_seq_length": 384,
     "doc_stride": 64,
-    "memory_num_tokens": 8
+    "memory_num_tokens": 0
   },
   "splits": [
+    "train",
     "validation"
   ],
   "output_dir": "preprocessed_data/squad_v2"

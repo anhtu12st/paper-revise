@@ -139,7 +139,13 @@ class ChunkedDataset:
                 doc_idx += 1
 
         self._total_documents: int = doc_idx
+
+        # Memory management for streaming mode
+        self._max_loaded_chunks = 5  # Keep at most 5 chunks in memory
+        self._chunk_access_order: list[Any] = []  # Track access order for LRU eviction
+
         logger.info(f"📊 Streaming mode: {self._total_documents} documents across {len(self.chunks)} chunks")
+        logger.info(f"💾 Chunk cache limit: {self._max_loaded_chunks} chunks")
 
     def _load_first_n(self) -> None:
         """Load first N examples."""
@@ -263,6 +269,9 @@ class ChunkedDataset:
                 "has_answer": item.get("has_answer", False),
                 "chosen_answer_text": item.get("chosen_answer_text", ""),
                 "chosen_answer_char_span": item.get("chosen_answer_char_span", [-1, -1]),
+                # Segment selection metadata
+                "segment_index_in_doc": item.get("segment_index_in_doc", 0),
+                "has_answer_in_segment": item.get("has_answer_in_segment", False),
             }
 
             documents_dict[doc_id].append(segment)
@@ -270,9 +279,9 @@ class ChunkedDataset:
         # Convert to list and sort by document ID
         documents = [documents_dict[doc_id] for doc_id in sorted(documents_dict.keys())]
 
-        # Apply max_n_segs filter if specified
-        if self.max_n_segs is not None:
-            documents = [doc[: self.max_n_segs] for doc in documents]
+        # Note: max_n_segs is no longer applied here for truncation
+        # Segment selection will happen at dataloader level via SegmentSelector
+        # Keep all segments to allow smart selection (answer-centered, etc.)
 
         return documents
 
@@ -282,20 +291,35 @@ class ChunkedDataset:
         self.document_map = {}
 
         if self.mode == "streaming":
-            # For streaming mode, flatten on-demand is not practical
-            # Load all documents and flatten them
-            logger.info(f"⚠️  Streaming mode: Loading all {self._total_documents} documents for flattening...")
+            # For streaming mode, build lightweight document map without loading all features
+            # Features will be loaded on-demand in TimeStepMajorDataLoader
+            logger.info(f"📊 Streaming mode: Building document map for {self._total_documents} documents...")
+
+            # Build document map by reading chunk manifests only (no data loading)
+            self._doc_metadata = {}  # Initialize metadata storage
             for doc_idx in range(self._total_documents):
                 doc_id = f"doc_{doc_idx}"
+
+                # Find which chunk this document is in
+                chunk_id = self._document_to_chunk.get(doc_idx)
+                chunk = next((c for c in self.chunks if c["chunk_id"] == chunk_id), None)
+
+                if chunk is None:
+                    logger.warning(f"⚠️ Document {doc_idx} not found in any chunk")
+                    continue
+
+                # Create placeholder mapping that will be filled on first access
                 self.document_map[doc_id] = []
 
-                # Load document (triggers lazy loading)
-                doc_segments = self._get_document_by_index(doc_idx)
+                # Store metadata for lazy loading
+                self._doc_metadata[doc_id] = {
+                    'doc_idx': doc_idx,
+                    'chunk_id': chunk_id,
+                    'loaded': False,
+                }
 
-                for segment in doc_segments:
-                    segment_idx = len(self.features)
-                    self.features.append(segment)
-                    self.document_map[doc_id].append(segment_idx)
+            logger.info(f"✅ Document map built: {len(self.document_map)} documents (features will load on-demand)")
+
         else:
             # For non-streaming modes, flatten pre-loaded documents
             for doc_idx, doc_segments in enumerate(self.documents):
@@ -324,6 +348,14 @@ class ChunkedDataset:
 
             # Check if chunk is already loaded
             if chunk_id not in self._loaded_chunks:
+                # Implement LRU eviction if we hit the cache limit
+                if len(self._loaded_chunks) >= self._max_loaded_chunks:
+                    # Remove oldest chunk (first in access order)
+                    oldest_chunk_id = self._chunk_access_order.pop(0)
+                    if oldest_chunk_id in self._loaded_chunks:
+                        del self._loaded_chunks[oldest_chunk_id]
+                        logger.debug(f"💾 Evicted chunk {oldest_chunk_id} from cache (LRU)")
+
                 chunk = next((c for c in self.chunks if c["chunk_id"] == chunk_id), None)
                 if chunk is None:
                     raise ValueError(f"Chunk {chunk_id} not found in manifest")
@@ -332,7 +364,12 @@ class ChunkedDataset:
                 chunk_data = self._load_chunk(chunk_path)
                 self._loaded_chunks[chunk_id] = self._group_segments_to_documents(chunk_data)
 
-                logger.debug(f"📥 Loaded chunk {chunk_id} on-demand")
+                logger.debug(f"📥 Loaded chunk {chunk_id} on-demand (cache: {len(self._loaded_chunks)}/{self._max_loaded_chunks})")
+
+            # Update access order for LRU
+            if chunk_id in self._chunk_access_order:
+                self._chunk_access_order.remove(chunk_id)
+            self._chunk_access_order.append(chunk_id)
 
             # Find document within chunk
             chunk = next(c for c in self.chunks if c["chunk_id"] == chunk_id)
@@ -345,8 +382,18 @@ class ChunkedDataset:
             return self.documents[idx]
 
     def __len__(self) -> int:
-        """Return number of segments."""
-        return len(self.features)
+        """Return number of segments.
+
+        Note: In streaming mode, this returns the number of documents (not segments)
+        since segments are loaded on-demand. TimeStepMajorDataLoader works at
+        document level, so this is fine.
+        """
+        if self.mode == "streaming":
+            # Return number of documents for streaming mode
+            # TimeStepMajorDataLoader iterates over documents, not individual segments
+            return len(self.document_map)
+        else:
+            return len(self.features)
 
     def __getitem__(self, idx: int) -> dict[str, Any]:
         """Get a single segment by index.
@@ -384,6 +431,8 @@ class ChunkedDataset:
             "has_answer",
             "chosen_answer_text",
             "chosen_answer_char_span",
+            "segment_index_in_doc",  # Position within document (for segment selection)
+            "has_answer_in_segment",  # Whether this segment contains the answer
             "boundary_info",
         ]
         for key in metadata_keys:
@@ -409,6 +458,25 @@ class ChunkedDataset:
         Returns:
             List of segment indices belonging to this document
         """
+        if self.mode == "streaming":
+            # Lazy load document segments on first access
+            if hasattr(self, '_doc_metadata') and example_id in self._doc_metadata:
+                metadata = self._doc_metadata[example_id]
+                if not metadata['loaded']:
+                    # Load this document's segments
+                    doc_idx = metadata['doc_idx']
+                    doc_segments = self._get_document_by_index(doc_idx)
+
+                    # Add segments to features list and update document_map
+                    segment_indices = []
+                    for segment in doc_segments:
+                        segment_idx = len(self.features)
+                        self.features.append(segment)
+                        segment_indices.append(segment_idx)
+
+                    self.document_map[example_id] = segment_indices
+                    metadata['loaded'] = True
+
         return list(self.document_map.get(example_id, []))
 
     @classmethod

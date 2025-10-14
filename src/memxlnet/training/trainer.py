@@ -307,6 +307,13 @@ class TrainingConfig:
     chunked_num_examples: int | None = None  # Number of examples to load (for "first_n" mode)
     chunked_chunk_indices: list[int] | None = None  # Specific chunks to load (for "chunks" mode)
 
+    # Smart segment selection for progressive training
+    segment_selection_strategy: str = "answer_centered"  # Segment selection strategy:
+    # - "answer_centered": Place answer segment near middle (default, recommended)
+    # - "random_continuous": Random N continuous segments
+    # - "first_n": Use first N segments (original behavior, for comparison)
+    segment_selection_seed: int = 42  # Random seed for reproducible segment selection (fixed per experiment)
+
     def __post_init__(self):
         """Post-initialization setup."""
         os.makedirs(self.output_dir, exist_ok=True)
@@ -509,9 +516,17 @@ class XLNetRecurrentTrainer:
 
     def prepare_data(
         self,
+        override_max_segments: int | None = None,
     ) -> tuple[DataLoader[Any] | TimeStepMajorDataLoader, DataLoader[Any] | TimeStepMajorDataLoader, Any]:
-        """Prepare training and evaluation datasets with memory-efficient loading."""
+        """Prepare training and evaluation datasets with memory-efficient loading.
+
+        Args:
+            override_max_segments: Override max_segments for progressive training stages.
+                If None, uses all segments from the dataset.
+        """
         logger.info("📚 Preparing datasets...")
+        if override_max_segments is not None:
+            logger.info(f"📊 Progressive training: limiting to {override_max_segments} segments per document")
 
         # FAST PATH: Check for chunked datasets first (2-5 min vs 30-60 min)
         if self.config.use_chunked_dataset and self.config.chunked_dataset_dir:
@@ -571,6 +586,9 @@ class XLNetRecurrentTrainer:
                 num_workers=0,  # ChunkedDataset doesn't work well with multiprocessing
                 memory_collate_config=memory_collate_cfg,
                 use_time_step_major=True,
+                max_segments=override_max_segments,  # Progressive training override or None for all
+                segment_selection_strategy=self.config.segment_selection_strategy,
+                epoch_seed=self.config.segment_selection_seed,
             )
 
             eval_dataloader = create_dataloader(
@@ -580,6 +598,9 @@ class XLNetRecurrentTrainer:
                 num_workers=0,  # ChunkedDataset doesn't work well with multiprocessing
                 memory_collate_config=memory_collate_cfg,
                 use_time_step_major=True,
+                max_segments=override_max_segments,  # Use same limit for evaluation
+                segment_selection_strategy=self.config.segment_selection_strategy,
+                epoch_seed=self.config.segment_selection_seed,
             )
 
             logger.info("✅ Chunked dataset loading complete (fast path)")
@@ -673,6 +694,9 @@ class XLNetRecurrentTrainer:
             num_workers=12,
             memory_collate_config=memory_collate_cfg,
             use_time_step_major=True,
+            max_segments=override_max_segments,  # Progressive training override or None for all
+            segment_selection_strategy=self.config.segment_selection_strategy,
+            epoch_seed=self.config.segment_selection_seed,
         )
 
         eval_dataloader = create_dataloader(
@@ -682,6 +706,9 @@ class XLNetRecurrentTrainer:
             num_workers=12,
             memory_collate_config=memory_collate_cfg,
             use_time_step_major=True,
+            max_segments=override_max_segments,  # Use same limit for evaluation
+            segment_selection_strategy=self.config.segment_selection_strategy,
+            epoch_seed=self.config.segment_selection_seed,
         )
 
         logger.info(f"📊 Training documents: {len(train_dataset)}")
@@ -1944,8 +1971,8 @@ class XLNetRecurrentTrainer:
                 f"\n🚀 STAGE {stage + 1}/{len(self.config.progressive_segments)}: Training with max {max_segs} segments"
             )
 
-            # Update configuration for this stage
-            self.config.max_n_segs = max_segs
+            # Update configuration for this stage (output paths only, NOT max_n_segs)
+            # max_n_segs no longer used for truncation - segments selected dynamically at dataloader level
             self.config.output_dir = os.path.join(original_output_dir, f"stage_{stage + 1}_segs_{max_segs}")
             self.config.run_name = f"{original_output_dir.split('/')[-1]}_stage_{stage + 1}_segs_{max_segs}"
 
@@ -2005,9 +2032,10 @@ class XLNetRecurrentTrainer:
                 else:
                     logger.warning("⚠️ Previous stage model not found locally or on Hub")
 
-            # Prepare data with new segment limit
-            logger.info(f"📚 Preparing data with max {max_segs} segments per document")
-            train_dataloader, eval_dataloader, eval_dataset = self.prepare_data()
+            # Prepare data with segment limit for this stage
+            # Segments selected dynamically at dataloader level using smart selection
+            logger.info(f"📚 Preparing data with max {max_segs} segments per document (smart selection enabled)")
+            train_dataloader, eval_dataloader, eval_dataset = self.prepare_data(override_max_segments=max_segs)
 
             # Reset training state for new stage
             self.global_step = 0

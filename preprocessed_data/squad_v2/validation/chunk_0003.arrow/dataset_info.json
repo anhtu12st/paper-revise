@@ -79,6 +79,14 @@
         "_type": "Value"
       },
       "_type": "List"
+    },
+    "segment_index_in_doc": {
+      "dtype": "int64",
+      "_type": "Value"
+    },
+    "has_answer_in_segment": {
+      "dtype": "bool",
+      "_type": "Value"
     }
   },
   "homepage": "",

@@ -93,7 +93,7 @@ def parse_args():
     parser.add_argument(
         "--memory-tokens",
         type=int,
-        default=8,
+        default=0,
         help="Number of memory tokens (default: 8)",
     )
     parser.add_argument(
@@ -158,7 +158,7 @@ def preprocess_split(
     tokenizer: XLNetTokenizerFast,
     temp_cache_dir: str,
 ):
-    """Preprocess a single dataset split into chunks.
+    """Preprocess a single dataset split into chunks with streaming to avoid OOM.
 
     Args:
         dataset_name: Dataset name
@@ -179,116 +179,154 @@ def preprocess_split(
     split_dir = output_dir / split
     split_dir.mkdir(parents=True, exist_ok=True)
 
-    # Process dataset directly with SquadLikeQADataset (single-pass processing)
-    logger.info("📊 Processing dataset directly...")
+    # Use streaming processing to avoid loading entire dataset into memory
+    logger.info("🌊 Using streaming processing to avoid OOM...")
+    from datasets import load_dataset
     from memxlnet.data.dataset import SquadLikeQADataset
 
-    # SquadLikeQADataset loads and processes the raw dataset internally
-    logger.info("🔄 Converting to segmented format...")
-    full_dataset = SquadLikeQADataset(
-        split=split,
-        tokenizer=tokenizer,
-        max_seq_length=max_seq_length,
-        doc_stride=doc_stride,
-        max_examples=None,  # Process all examples
-        dataset_name=dataset_name,
-        max_n_segs=None,  # Load all segments
-    )
+    # Load raw dataset info to get total count
+    logger.info("📊 Loading dataset metadata...")
+    raw_dataset = load_dataset(dataset_name, split=split)
+    total_examples = len(raw_dataset)
+    logger.info(f"📊 Total examples in {split}: {total_examples}")
 
-    logger.info(f"✅ Processed {len(full_dataset.features)} features from {len(full_dataset.document_map)} documents")
-
-    # Split into chunks and save as Arrow files
-    # SquadLikeQADataset has features (segments) and document_map
-    documents = list(full_dataset.document_map.keys())
-    logger.info(f"📦 Splitting {len(documents)} documents into chunks of {chunk_size}...")
+    # Process in batches to avoid OOM
+    processing_batch_size = 100  # Process 100 raw documents at a time
+    logger.info(f"🔄 Processing in batches of {processing_batch_size} raw documents...")
+    logger.info(f"📦 Will save chunks of {chunk_size} processed documents each...")
 
     chunks_info = []
     chunk_idx = 0
-    document_idx = 0
+    global_doc_idx = 0  # Global document counter across all chunks
 
-    with tqdm(total=len(documents), desc=f"Creating chunks for {split}") as pbar:
-        while document_idx < len(documents):
-            # Get chunk of documents
-            end_idx = min(document_idx + chunk_size, len(documents))
-            chunk_doc_ids = documents[document_idx:end_idx]
+    # Accumulator for current chunk being built
+    current_chunk_data = {
+        "document_id": [],
+        "segment_id": [],
+        "example_id": [],
+        "input_ids": [],
+        "attention_mask": [],
+        "token_type_ids": [],
+        "offset_mapping": [],
+        "context": [],
+        "start_positions": [],
+        "end_positions": [],
+        # Metadata fields for evaluation (CRITICAL: includes cls_index for XLNet)
+        "question": [],
+        "cls_index": [],
+        "has_answer": [],
+        "chosen_answer_text": [],
+        "chosen_answer_char_span": [],
+        # NEW: Segment selection metadata for smart progressive training
+        "segment_index_in_doc": [],  # Position of segment within document
+        "has_answer_in_segment": [],  # Whether this specific segment contains the answer
+    }
+    current_chunk_doc_count = 0
+    chunk_start_doc_idx = 0
 
-            # Save chunk as Arrow file
-            chunk_filename = f"chunk_{chunk_idx:04d}.arrow"
-            chunk_path = split_dir / chunk_filename
+    # Process raw dataset in batches
+    raw_idx = 0
+    with tqdm(total=total_examples, desc=f"Processing {split}") as pbar:
+        while raw_idx < total_examples:
+            # Get batch of raw examples
+            batch_end = min(raw_idx + processing_batch_size, total_examples)
+            raw_batch = raw_dataset[raw_idx:batch_end]
 
-            # Convert to HuggingFace dataset and save
-            from datasets import Dataset as HFDataset
+            # Process batch manually to avoid loading entire dataset
+            logger.info(f"🔄 Processing raw examples {raw_idx}-{batch_end}...")
 
-            # Flatten document segments for Arrow format
-            chunk_data = {
-                "document_id": [],
-                "segment_id": [],
-                "example_id": [],
-                "input_ids": [],
-                "attention_mask": [],
-                "token_type_ids": [],
-                "offset_mapping": [],
-                "context": [],
-                "start_positions": [],
-                "end_positions": [],
-                # Metadata fields for evaluation (CRITICAL: includes cls_index for XLNet)
-                "question": [],
-                "cls_index": [],
-                "has_answer": [],
-                "chosen_answer_text": [],
-                "chosen_answer_char_span": [],
-            }
+            # Process each example in the raw batch
+            batch_size_actual = len(raw_batch["id"])
+            for batch_local_idx in range(batch_size_actual):
+                # Extract single example from batch
+                # Handle nested structure properly
+                answers_data = raw_batch["answers"][batch_local_idx]
 
-            # Process each document in this chunk
-            for local_doc_idx, doc_id in enumerate(chunk_doc_ids):
-                segment_indices = full_dataset.document_map[doc_id]
-
-                for seg_idx, feature_idx in enumerate(segment_indices):
-                    feature = full_dataset.features[feature_idx]
-
-                    chunk_data["document_id"].append(document_idx + local_doc_idx)
-                    chunk_data["segment_id"].append(seg_idx)
-                    chunk_data["example_id"].append(feature.get("example_id", doc_id))
-                    chunk_data["input_ids"].append(feature["input_ids"])
-                    chunk_data["attention_mask"].append(feature["attention_mask"])
-                    chunk_data["token_type_ids"].append(feature["token_type_ids"])
-                    chunk_data["offset_mapping"].append(feature["offset_mapping"])
-                    chunk_data["context"].append(feature["context"])
-                    chunk_data["start_positions"].append(feature["start_positions"])
-                    chunk_data["end_positions"].append(feature["end_positions"])
-                    # Add metadata fields (with defaults if missing)
-                    chunk_data["question"].append(feature.get("question", ""))
-                    chunk_data["cls_index"].append(feature.get("cls_index", 0))
-                    chunk_data["has_answer"].append(feature.get("has_answer", False))
-                    chunk_data["chosen_answer_text"].append(feature.get("chosen_answer_text", ""))
-                    chunk_data["chosen_answer_char_span"].append(feature.get("chosen_answer_char_span", [-1, -1]))
-
-            # Create HuggingFace dataset and save
-            hf_dataset = HFDataset.from_dict(chunk_data)
-
-            # Save as Arrow (memory-mapped, fast loading)
-            hf_dataset.save_to_disk(str(chunk_path))
-
-            # Record chunk info
-            chunks_info.append(
-                {
-                    "chunk_id": chunk_idx,
-                    "path": f"{split}/{chunk_filename}",
-                    "num_documents": end_idx - document_idx,
-                    "num_segments": len(chunk_data["segment_id"]),
-                    "document_range": [document_idx, end_idx],
+                example = {
+                    "id": raw_batch["id"][batch_local_idx],
+                    "question": raw_batch["question"][batch_local_idx],
+                    "context": raw_batch["context"][batch_local_idx],
+                    "answers": {
+                        "text": answers_data["text"] if isinstance(answers_data, dict) else answers_data.get("text", []),
+                        "answer_start": answers_data["answer_start"] if isinstance(answers_data, dict) else answers_data.get("answer_start", []),
+                    },
+                    "title": raw_batch.get("title", [""] * batch_size_actual)[batch_local_idx] if "title" in raw_batch else "",
                 }
-            )
 
-            logger.info(
-                f"✅ Saved chunk {chunk_idx}: {end_idx - document_idx} documents, "
-                f"{len(chunk_data['segment_id'])} segments → {chunk_path}"
-            )
+                # Process this example into segments using the _process_example logic
+                from memxlnet.data.dataset import SquadLikeQADataset
 
-            # Update indices
-            chunk_idx += 1
-            document_idx = end_idx
-            pbar.update(end_idx - document_idx)
+                # Create a temporary minimal dataset object just to call _process_example
+                temp_ds = SquadLikeQADataset.__new__(SquadLikeQADataset)
+                processed_segments = temp_ds._process_example(
+                    example=example,
+                    example_idx=global_doc_idx,
+                    tokenizer=tokenizer,
+                    max_seq_length=max_seq_length,
+                    doc_stride=doc_stride,
+                    max_n_segs=None,  # Keep all segments
+                )
+
+                # Add all segments from this example to current chunk
+                for seg_idx, feature in enumerate(processed_segments):
+                    current_chunk_data["document_id"].append(global_doc_idx)
+                    current_chunk_data["segment_id"].append(seg_idx)
+                    current_chunk_data["example_id"].append(f"doc_{global_doc_idx}")
+                    current_chunk_data["input_ids"].append(feature["input_ids"])
+                    current_chunk_data["attention_mask"].append(feature["attention_mask"])
+                    current_chunk_data["token_type_ids"].append(feature["token_type_ids"])
+                    current_chunk_data["offset_mapping"].append(feature["offset_mapping"])
+                    current_chunk_data["context"].append(feature["context"])
+                    current_chunk_data["start_positions"].append(feature["start_positions"])
+                    current_chunk_data["end_positions"].append(feature["end_positions"])
+                    # Add metadata fields (with defaults if missing)
+                    current_chunk_data["question"].append(feature.get("question", ""))
+                    current_chunk_data["cls_index"].append(feature.get("cls_index", 0))
+                    current_chunk_data["has_answer"].append(feature.get("has_answer", False))
+                    current_chunk_data["chosen_answer_text"].append(feature.get("chosen_answer_text", ""))
+                    current_chunk_data["chosen_answer_char_span"].append(
+                        feature.get("chosen_answer_char_span", [-1, -1])
+                    )
+                    # Add segment selection metadata
+                    current_chunk_data["segment_index_in_doc"].append(feature.get("segment_index_in_doc", seg_idx))
+                    current_chunk_data["has_answer_in_segment"].append(feature.get("has_answer_in_segment", False))
+
+                current_chunk_doc_count += 1
+                global_doc_idx += 1
+
+                # Save chunk if it reaches the chunk size
+                if current_chunk_doc_count >= chunk_size:
+                    _save_chunk(
+                        current_chunk_data,
+                        split_dir,
+                        chunk_idx,
+                        chunk_start_doc_idx,
+                        global_doc_idx,
+                        chunks_info,
+                        split,
+                    )
+
+                    # Reset for next chunk
+                    current_chunk_data = {k: [] for k in current_chunk_data.keys()}
+                    current_chunk_doc_count = 0
+                    chunk_start_doc_idx = global_doc_idx
+                    chunk_idx += 1
+
+            # Update progress
+            raw_idx = batch_end
+            pbar.update(batch_end - raw_idx + processing_batch_size)
+
+    # Save remaining data as final chunk
+    if current_chunk_doc_count > 0:
+        _save_chunk(
+            current_chunk_data,
+            split_dir,
+            chunk_idx,
+            chunk_start_doc_idx,
+            global_doc_idx,
+            chunks_info,
+            split,
+        )
 
     # Create manifest
     config = {
@@ -303,6 +341,52 @@ def preprocess_split(
     logger.info(f"   Total documents: {manifest['total_examples']}")
     logger.info(f"   Total chunks: {manifest['total_chunks']}")
     logger.info(f"   Chunks directory: {split_dir}")
+
+
+def _save_chunk(
+    chunk_data: dict,
+    split_dir: Path,
+    chunk_idx: int,
+    start_doc_idx: int,
+    end_doc_idx: int,
+    chunks_info: list,
+    split: str,
+) -> None:
+    """Save a chunk to disk.
+
+    Args:
+        chunk_data: Dictionary containing all chunk data
+        split_dir: Directory for this split
+        chunk_idx: Index of this chunk
+        start_doc_idx: Starting document index
+        end_doc_idx: Ending document index
+        chunks_info: List to append chunk metadata to
+        split: Split name
+    """
+    from datasets import Dataset as HFDataset
+
+    chunk_filename = f"chunk_{chunk_idx:04d}.arrow"
+    chunk_path = split_dir / chunk_filename
+
+    # Create HuggingFace dataset and save
+    hf_dataset = HFDataset.from_dict(chunk_data)
+    hf_dataset.save_to_disk(str(chunk_path))
+
+    # Record chunk info
+    chunks_info.append(
+        {
+            "chunk_id": chunk_idx,
+            "path": f"{split}/{chunk_filename}",
+            "num_documents": end_doc_idx - start_doc_idx,
+            "num_segments": len(chunk_data["segment_id"]),
+            "document_range": [start_doc_idx, end_doc_idx],
+        }
+    )
+
+    logger.info(
+        f"✅ Saved chunk {chunk_idx}: {end_doc_idx - start_doc_idx} documents, "
+        f"{len(chunk_data['segment_id'])} segments → {chunk_path}"
+    )
 
 
 def main():

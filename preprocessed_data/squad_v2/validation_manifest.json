@@ -7,7 +7,7 @@
   "config": {
     "max_seq_length": 384,
     "doc_stride": 64,
-    "memory_num_tokens": 8
+    "memory_num_tokens": 0
   },
   "chunks": [
     {
