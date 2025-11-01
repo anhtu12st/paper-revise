@@ -48,7 +48,7 @@ def investigate_evaluation_issue():
         eval_split="validation",
         cache_dir="./.cache_comparison",
         max_train_samples=100,  # Small for quick test
-        max_eval_samples=50,    # Small for quick test
+        max_eval_samples=50,  # Small for quick test
         use_lazy_loading=False,
         progressive_segments=[2],
         max_n_segs=2,
@@ -108,9 +108,7 @@ def investigate_evaluation_issue():
 
         # Check what attributes the trainer does have
         relevant_attrs = [
-            attr
-            for attr in dir(trainer)
-            if not attr.startswith("_") and not callable(getattr(trainer, attr))
+            attr for attr in dir(trainer) if not attr.startswith("_") and not callable(getattr(trainer, attr))
         ][:20]
         print(f"   - First 20 non-private attributes: {relevant_attrs}")
         print()

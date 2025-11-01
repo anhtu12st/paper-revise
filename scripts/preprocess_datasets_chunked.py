@@ -182,6 +182,7 @@ def preprocess_split(
     # Use streaming processing to avoid loading entire dataset into memory
     logger.info("🌊 Using streaming processing to avoid OOM...")
     from datasets import load_dataset
+
     from memxlnet.data.dataset import SquadLikeQADataset
 
     # Load raw dataset info to get total count
@@ -247,10 +248,16 @@ def preprocess_split(
                     "question": raw_batch["question"][batch_local_idx],
                     "context": raw_batch["context"][batch_local_idx],
                     "answers": {
-                        "text": answers_data["text"] if isinstance(answers_data, dict) else answers_data.get("text", []),
-                        "answer_start": answers_data["answer_start"] if isinstance(answers_data, dict) else answers_data.get("answer_start", []),
+                        "text": answers_data["text"]
+                        if isinstance(answers_data, dict)
+                        else answers_data.get("text", []),
+                        "answer_start": answers_data["answer_start"]
+                        if isinstance(answers_data, dict)
+                        else answers_data.get("answer_start", []),
                     },
-                    "title": raw_batch.get("title", [""] * batch_size_actual)[batch_local_idx] if "title" in raw_batch else "",
+                    "title": raw_batch.get("title", [""] * batch_size_actual)[batch_local_idx]
+                    if "title" in raw_batch
+                    else "",
                 }
 
                 # Process this example into segments using the _process_example logic

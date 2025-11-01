@@ -39,13 +39,21 @@ import json
 import logging
 from collections import defaultdict
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 import torch
 from datasets import Dataset as HFDataset
 from datasets import load_from_disk
 
 logger = logging.getLogger(__name__)
+
+
+class DocumentMetadata(TypedDict):
+    """Metadata for a document in streaming mode."""
+
+    doc_idx: int
+    chunk_id: int
+    loaded: bool
 
 
 class ChunkedDataset:
@@ -59,6 +67,14 @@ class ChunkedDataset:
     documents: list[list[dict[str, Any]]]  # For non-streaming modes
     features: list[dict[str, Any]]  # Flattened segments for TimeStepMajorDataLoader
     document_map: dict[str, list[int]]  # Maps doc_id -> list of segment indices
+
+    # Streaming mode attributes
+    _doc_metadata: dict[str, DocumentMetadata]  # Document metadata for lazy loading
+    _loaded_chunks: dict[Any, list[list[dict[str, Any]]]]  # Cached loaded chunks
+    _document_to_chunk: dict[int, Any]  # Maps doc index to chunk ID
+    _total_documents: int  # Total number of documents in streaming mode
+    _max_loaded_chunks: int  # LRU cache size limit
+    _chunk_access_order: list[Any]  # LRU tracking
 
     def __init__(
         self,
@@ -302,8 +318,11 @@ class ChunkedDataset:
 
                 # Find which chunk this document is in
                 chunk_id = self._document_to_chunk.get(doc_idx)
-                chunk = next((c for c in self.chunks if c["chunk_id"] == chunk_id), None)
+                if chunk_id is None:
+                    logger.warning(f"⚠️ Document {doc_idx} has no chunk mapping")
+                    continue
 
+                chunk = next((c for c in self.chunks if c["chunk_id"] == chunk_id), None)
                 if chunk is None:
                     logger.warning(f"⚠️ Document {doc_idx} not found in any chunk")
                     continue
@@ -313,9 +332,9 @@ class ChunkedDataset:
 
                 # Store metadata for lazy loading
                 self._doc_metadata[doc_id] = {
-                    'doc_idx': doc_idx,
-                    'chunk_id': chunk_id,
-                    'loaded': False,
+                    "doc_idx": doc_idx,
+                    "chunk_id": chunk_id,
+                    "loaded": False,
                 }
 
             logger.info(f"✅ Document map built: {len(self.document_map)} documents (features will load on-demand)")
@@ -364,7 +383,9 @@ class ChunkedDataset:
                 chunk_data = self._load_chunk(chunk_path)
                 self._loaded_chunks[chunk_id] = self._group_segments_to_documents(chunk_data)
 
-                logger.debug(f"📥 Loaded chunk {chunk_id} on-demand (cache: {len(self._loaded_chunks)}/{self._max_loaded_chunks})")
+                logger.debug(
+                    f"📥 Loaded chunk {chunk_id} on-demand (cache: {len(self._loaded_chunks)}/{self._max_loaded_chunks})"
+                )
 
             # Update access order for LRU
             if chunk_id in self._chunk_access_order:
@@ -460,11 +481,11 @@ class ChunkedDataset:
         """
         if self.mode == "streaming":
             # Lazy load document segments on first access
-            if hasattr(self, '_doc_metadata') and example_id in self._doc_metadata:
+            if hasattr(self, "_doc_metadata") and example_id in self._doc_metadata:
                 metadata = self._doc_metadata[example_id]
-                if not metadata['loaded']:
+                if not metadata["loaded"]:
                     # Load this document's segments
-                    doc_idx = metadata['doc_idx']
+                    doc_idx = metadata["doc_idx"]
                     doc_segments = self._get_document_by_index(doc_idx)
 
                     # Add segments to features list and update document_map
@@ -475,7 +496,7 @@ class ChunkedDataset:
                         segment_indices.append(segment_idx)
 
                     self.document_map[example_id] = segment_indices
-                    metadata['loaded'] = True
+                    metadata["loaded"] = True
 
         return list(self.document_map.get(example_id, []))
 

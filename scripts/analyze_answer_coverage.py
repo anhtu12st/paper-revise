@@ -19,14 +19,14 @@ Usage:
 
 import argparse
 import sys
-from collections import defaultdict
 from pathlib import Path
 
 from datasets import load_dataset
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-from memxlnet.data.dataset import SquadLikeQADataset
 from transformers import XLNetTokenizerFast
+
+from memxlnet.data.dataset import SquadLikeQADataset
 
 
 def analyze_answer_coverage(split: str = "validation", max_examples: int | None = None):
@@ -195,9 +195,9 @@ def analyze_answer_coverage(split: str = "validation", max_examples: int | None 
         print("Top 10 examples with most uncovered answers:")
         for i, (ex_id, info) in enumerate(incomplete_examples[:10]):
             example_idx = int(ex_id.split("_")[1])
-            print(f"\n{i+1}. Example {example_idx} ({ex_id}):")
+            print(f"\n{i + 1}. Example {example_idx} ({ex_id}):")
             print(f"   Total answers: {info['num_answers']}")
-            print(f"   Covered: {info['answers_covered']} ({info['coverage_rate']*100:.0f}%)")
+            print(f"   Covered: {info['answers_covered']} ({info['coverage_rate'] * 100:.0f}%)")
             print(f"   All answers: {info['all_answers']}")
             print(f"   Covered indices: {info['covered_indices']}")
 

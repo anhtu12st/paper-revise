@@ -478,19 +478,13 @@ class SegmentSelector:
 
             if answer_segment_idx is None:
                 # No answer: use random continuous
-                return self._random_continuous_segments(
-                    all_segments, n_segments, epoch_seed
-                )
+                return self._random_continuous_segments(all_segments, n_segments, epoch_seed)
 
             # Center answer segment in selection
-            return self._center_segments_around(
-                all_segments, n_segments, answer_segment_idx
-            )
+            return self._center_segments_around(all_segments, n_segments, answer_segment_idx)
 
         elif strategy == "random_continuous":
-            return self._random_continuous_segments(
-                all_segments, n_segments, epoch_seed
-            )
+            return self._random_continuous_segments(all_segments, n_segments, epoch_seed)
 
         else:
             raise ValueError(f"Unknown segment selection strategy: {strategy}")
@@ -521,9 +515,7 @@ class SegmentSelector:
 
         return None
 
-    def _center_segments_around(
-        self, segments: list[int], n: int, center_idx: int
-    ) -> list[int]:
+    def _center_segments_around(self, segments: list[int], n: int, center_idx: int) -> list[int]:
         """Select N segments with center_idx near the middle.
 
         Args:
@@ -551,9 +543,7 @@ class SegmentSelector:
 
         return segments[start : start + n]
 
-    def _random_continuous_segments(
-        self, segments: list[int], n: int, epoch_seed: int | None
-    ) -> list[int]:
+    def _random_continuous_segments(self, segments: list[int], n: int, epoch_seed: int | None) -> list[int]:
         """Select N random continuous segments.
 
         Args:

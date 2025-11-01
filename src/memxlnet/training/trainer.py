@@ -1346,7 +1346,7 @@ class XLNetRecurrentTrainer:
             logger.info("📊 Attempting to extract references from preprocessed features...")
 
             # Get all document IDs from dataset
-            if hasattr(dataset, 'get_all_documents'):
+            if hasattr(dataset, "get_all_documents"):
                 document_ids = dataset.get_all_documents()
 
                 for doc_id in document_ids:
@@ -1539,9 +1539,7 @@ class XLNetRecurrentTrainer:
                 # Check how many predictions have matching references
                 matched_ids = sum(1 for pred_id in predictions.keys() if pred_id in references)
                 match_rate = 100 * matched_ids / len(predictions) if predictions else 0
-                logger.info(
-                    f"   ID match rate: {matched_ids}/{len(predictions)} ({match_rate:.1f}%)"
-                )
+                logger.info(f"   ID match rate: {matched_ids}/{len(predictions)} ({match_rate:.1f}%)")
 
                 if match_rate < 50:
                     logger.warning(

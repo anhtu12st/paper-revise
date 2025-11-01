@@ -26,7 +26,6 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from memxlnet.data.dataset import ChunkedCacheManager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -34,9 +33,9 @@ logger = logging.getLogger(__name__)
 
 def inspect_directory_structure(data_dir: Path):
     """Inspect the directory structure."""
-    logger.info("="*80)
+    logger.info("=" * 80)
     logger.info("📁 DIRECTORY STRUCTURE")
-    logger.info("="*80)
+    logger.info("=" * 80)
 
     if not data_dir.exists():
         logger.warning(f"❌ Directory does not exist: {data_dir}")
@@ -77,9 +76,9 @@ def inspect_directory_structure(data_dir: Path):
 
 def inspect_manifest(data_dir: Path):
     """Inspect manifest files if they exist."""
-    logger.info("="*80)
+    logger.info("=" * 80)
     logger.info("📋 MANIFEST FILES")
-    logger.info("="*80)
+    logger.info("=" * 80)
 
     manifest_files = list(data_dir.glob("*manifest.json"))
 
@@ -91,7 +90,7 @@ def inspect_manifest(data_dir: Path):
     for manifest_path in manifest_files:
         logger.info(f"\n📄 {manifest_path.name}:")
         try:
-            with open(manifest_path, 'r') as f:
+            with open(manifest_path) as f:
                 manifest = json.load(f)
 
             for key, value in manifest.items():
@@ -109,9 +108,9 @@ def inspect_manifest(data_dir: Path):
 
 def inspect_cached_chunks(data_dir: Path, split: str, max_chunks: int = 3):
     """Inspect cached chunk files."""
-    logger.info("="*80)
+    logger.info("=" * 80)
     logger.info(f"📦 CACHED CHUNKS ({split.upper()} split)")
-    logger.info("="*80)
+    logger.info("=" * 80)
 
     # Look for cache files
     cache_pattern = f"squad_v2*_{split}_chunk_*.cache"
@@ -141,7 +140,7 @@ def inspect_cached_chunks(data_dir: Path, split: str, max_chunks: int = 3):
         logger.info(f"📦 Chunk {i}: {cache_file.name}")
 
         try:
-            chunk_data = torch.load(cache_file, map_location='cpu')
+            chunk_data = torch.load(cache_file, map_location="cpu")
 
             if isinstance(chunk_data, list):
                 num_features = len(chunk_data)
@@ -178,9 +177,9 @@ def inspect_feature_structure(features: list):
         logger.info("No features to inspect")
         return
 
-    logger.info("="*80)
+    logger.info("=" * 80)
     logger.info("🔍 FEATURE STRUCTURE")
-    logger.info("="*80)
+    logger.info("=" * 80)
 
     # Show keys in first feature
     first_feature = features[0]
@@ -213,19 +212,19 @@ def inspect_sample_features(features: list, num_samples: int = 2):
     if not features:
         return
 
-    logger.info("="*80)
+    logger.info("=" * 80)
     logger.info(f"📝 SAMPLE FEATURES (showing {min(num_samples, len(features))} samples)")
-    logger.info("="*80)
+    logger.info("=" * 80)
 
     for i, feature in enumerate(features[:num_samples]):
-        logger.info(f"\n📄 Sample {i+1}:")
+        logger.info(f"\n📄 Sample {i + 1}:")
         logger.info(f"  Example ID: {feature.get('example_id', 'N/A')}")
         logger.info(f"  Segment index: {feature.get('segment_index', 'N/A')}")
         logger.info(f"  Total segments: {feature.get('total_segments', 'N/A')}")
 
         # Input details
-        if 'input_ids' in feature:
-            input_ids = feature['input_ids']
+        if "input_ids" in feature:
+            input_ids = feature["input_ids"]
             logger.info(f"  Input IDs: list of {len(input_ids)} tokens")
 
             # Check for memory tokens (IDs > 32000)
@@ -234,40 +233,40 @@ def inspect_sample_features(features: list, num_samples: int = 2):
                 logger.info(f"    ⚠️ Contains {mem_token_count} memory tokens (ID > 32000)")
 
         # Token type IDs
-        if 'token_type_ids' in feature:
-            token_type_ids = feature['token_type_ids']
+        if "token_type_ids" in feature:
+            token_type_ids = feature["token_type_ids"]
             context_tokens = sum(1 for t in token_type_ids if t == 1)
             question_tokens = sum(1 for t in token_type_ids if t == 0)
             logger.info(f"  Token types: {context_tokens} context, {question_tokens} question/special")
 
         # Question and context
-        if 'question' in feature:
-            question = feature['question']
+        if "question" in feature:
+            question = feature["question"]
             logger.info(f"  Question: '{question[:80]}{'...' if len(question) > 80 else ''}'")
 
-        if 'context' in feature:
-            context = feature['context']
+        if "context" in feature:
+            context = feature["context"]
             logger.info(f"  Context: '{context[:80]}{'...' if len(context) > 80 else ''}'")
 
         # Answer info
-        if 'has_answer' in feature:
-            has_answer = feature['has_answer']
+        if "has_answer" in feature:
+            has_answer = feature["has_answer"]
             logger.info(f"  Has answer: {has_answer}")
 
-        if 'chosen_answer_text' in feature:
-            answer = feature['chosen_answer_text']
+        if "chosen_answer_text" in feature:
+            answer = feature["chosen_answer_text"]
             logger.info(f"  Answer: '{answer}'")
 
         # Position info
-        if 'cls_index' in feature:
+        if "cls_index" in feature:
             logger.info(f"  CLS index: {feature['cls_index']}")
 
-        if 'start_positions' in feature and 'end_positions' in feature:
+        if "start_positions" in feature and "end_positions" in feature:
             logger.info(f"  Answer positions: [{feature['start_positions']}, {feature['end_positions']}]")
 
         # Offset mapping
-        if 'offset_mapping' in feature:
-            offset_mapping = feature['offset_mapping']
+        if "offset_mapping" in feature:
+            offset_mapping = feature["offset_mapping"]
             logger.info(f"  Offset mapping: {len(offset_mapping)} entries")
             # Check for (0,0) offsets
             zero_offsets = sum(1 for o in offset_mapping if o == (0, 0))
@@ -279,37 +278,20 @@ def inspect_sample_features(features: list, num_samples: int = 2):
 def main():
     parser = argparse.ArgumentParser(description="Inspect preprocessed SQuAD v2 data")
     parser.add_argument(
-        "--data-dir",
-        type=str,
-        default="./preprocessed_data/squad_v2",
-        help="Preprocessed data directory"
+        "--data-dir", type=str, default="./preprocessed_data/squad_v2", help="Preprocessed data directory"
     )
     parser.add_argument(
-        "--split",
-        type=str,
-        default="train",
-        choices=["train", "validation"],
-        help="Which split to inspect"
+        "--split", type=str, default="train", choices=["train", "validation"], help="Which split to inspect"
     )
-    parser.add_argument(
-        "--show-samples",
-        type=int,
-        default=2,
-        help="Number of sample features to show in detail"
-    )
-    parser.add_argument(
-        "--max-chunks",
-        type=int,
-        default=3,
-        help="Maximum number of chunks to inspect"
-    )
+    parser.add_argument("--show-samples", type=int, default=2, help="Number of sample features to show in detail")
+    parser.add_argument("--max-chunks", type=int, default=3, help="Maximum number of chunks to inspect")
     args = parser.parse_args()
 
     data_dir = Path(args.data_dir)
 
-    logger.info("\n" + "="*80)
+    logger.info("\n" + "=" * 80)
     logger.info("🔍 PREPROCESSED DATA INSPECTOR")
-    logger.info("="*80)
+    logger.info("=" * 80)
     logger.info(f"Data directory: {data_dir}")
     logger.info(f"Split to inspect: {args.split}")
     logger.info("")
@@ -330,9 +312,9 @@ def main():
         inspect_sample_features(sample_features, args.show_samples)
 
     # Final summary
-    logger.info("="*80)
+    logger.info("=" * 80)
     logger.info("✅ INSPECTION COMPLETE")
-    logger.info("="*80)
+    logger.info("=" * 80)
 
     if not sample_features:
         logger.info("")
