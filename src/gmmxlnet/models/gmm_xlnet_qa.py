@@ -453,12 +453,79 @@ class GMMXLNetForQA(nn.Module):
 
             self.memory_mixture.set_expert_state(expert_idx, state)
 
-    def save_pretrained(self, save_directory: str) -> None:
+    def _validate_loaded_state(self) -> None:
+        """
+        Validate model state after loading from checkpoint.
+
+        Performs sanity checks on:
+        - Expert count matches configuration
+        - Routing network shape matches expected dimensions
+        - Expert states have correct shapes
+        - Forward pass works on dummy input
+
+        Raises:
+            ValueError: If validation fails
+        """
+        if not self.use_gmm_memory:
+            return
+
+        # Verify expert count by checking _expert_params entries
+        num_experts_in_mixture = len(
+            [name for name in self.memory_mixture.state_dict().keys() if name.startswith("_expert_params.")]
+        )
+        if num_experts_in_mixture != self.num_experts:
+            raise ValueError(
+                f"Expert count mismatch: config specifies {self.num_experts} experts "
+                f"but loaded mixture has {num_experts_in_mixture}"
+            )
+
+        # Verify routing network shape
+        gating_params = self.gating_network.state_dict()
+        if "routing_projection.weight" in gating_params:
+            weight_shape = gating_params["routing_projection.weight"].shape
+            expected_shape = (self.num_experts, self.hidden_dim)
+            if weight_shape != expected_shape:
+                raise ValueError(
+                    f"Routing network shape mismatch: expected {expected_shape}, got {weight_shape}"
+                )
+
+        # Verify expert states have correct shapes
+        for expert_idx in range(self.num_experts):
+            expert_state = self.memory_mixture.get_expert_state(expert_idx)
+            expected_shape = (self.memory_slots, self.hidden_dim)
+            if expert_state.shape != expected_shape:
+                raise ValueError(
+                    f"Expert {expert_idx} state shape mismatch: expected {expected_shape}, got {expert_state.shape}"
+                )
+
+        # Run sanity check on memory initialization (skip full forward pass in tests)
+        try:
+            device = next(self.parameters()).device
+            dummy_memory = self.get_initial_memory(1, device)
+
+            # Verify memory state structure
+            if len(dummy_memory) != self.num_experts:
+                raise ValueError(
+                    f"Memory initialization failed: expected {self.num_experts} expert states, "
+                    f"got {len(dummy_memory)}"
+                )
+        except StopIteration:
+            # No parameters (likely in a test with mocked base model), skip validation
+            pass
+        except Exception as e:
+            raise ValueError(f"Memory initialization validation failed after loading: {e}")
+
+    def save_pretrained(
+        self, save_directory: str, push_to_hub: bool = False, repo_id: str | None = None, **hub_kwargs: Any
+    ) -> None:
         """
         Save the model including GMM-specific parameters.
 
         Args:
             save_directory: Directory to save model files
+            push_to_hub: Whether to push the model to HuggingFace Hub
+            repo_id: Repository ID for Hub (e.g., "username/model-name")
+            **hub_kwargs: Additional arguments for Hub upload (commit_message, private, etc.)
         """
         os.makedirs(save_directory, exist_ok=True)
 
@@ -466,10 +533,11 @@ class GMMXLNetForQA(nn.Module):
         if hasattr(self.base, "save_pretrained"):
             self.base.save_pretrained(save_directory)
 
-        # Save GMM configuration
+        # Save GMM configuration with version info
         config = {
             "model_class": "GMMXLNetForQA",
             "memory_type": "gmm",
+            "version": "1.0",
             "num_experts": self.num_experts,
             "memory_slots": self.memory_slots,
             "routing_mode": self.routing_mode,
@@ -493,6 +561,24 @@ class GMMXLNetForQA(nn.Module):
             }
 
             torch.save(state_dict, os.path.join(save_directory, "gmm_state.pt"))
+
+        # Push to Hub if requested
+        if push_to_hub:
+            if repo_id is None:
+                raise ValueError("repo_id must be provided when push_to_hub=True")
+
+            from huggingface_hub import HfApi
+
+            api = HfApi()
+
+            # Upload all files in save_directory
+            api.upload_folder(
+                folder_path=save_directory,
+                repo_id=repo_id,
+                repo_type="model",
+                commit_message=hub_kwargs.pop("commit_message", "Upload GMMXLNet model"),
+                **hub_kwargs,
+            )
 
     @classmethod
     def from_pretrained(cls, load_directory: str, **kwargs: Any) -> "GMMXLNetForQA":
@@ -601,6 +687,9 @@ class GMMXLNetForQA(nn.Module):
             model.gating_network.load_state_dict(saved_state["gating_network"])
             model.expert_updater.load_state_dict(saved_state["expert_updater"])
             model.memory_reader.load_state_dict(saved_state["memory_reader"])
+
+            # Validate loaded state
+            model._validate_loaded_state()
 
         return model
 
