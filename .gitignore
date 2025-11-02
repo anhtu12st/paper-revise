@@ -80,3 +80,6 @@ Desktop.ini
 # Logs
 *.log
 .env
+
+.bmad-core/
+.claude/
