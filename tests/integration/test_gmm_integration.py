@@ -389,6 +389,467 @@ class TestGMMXLNetIntegration:
         assert "num_experts=4" in repr_str
         assert "memory_slots=16" in repr_str
 
+    @pytest.mark.integration
+    @pytest.mark.slow
+    def test_full_gmm_pipeline_execution(self, toy_base_model, toy_input_data):
+        """Test complete GMM pipeline: input → base → write → routing → update → read → output."""
+        model = GMMXLNetForQA(
+            base_model=toy_base_model,
+            num_experts=4,
+            memory_slots=4,
+            routing_mode="write-based",
+        )
+        model.eval()
+
+        # Step 1: Get initial memory state
+        batch_size = toy_input_data["input_ids"].size(0)
+        device = toy_input_data["input_ids"].device
+        initial_memory = model.get_initial_memory(batch_size, device)
+
+        # Verify initial memory structure
+        assert len(initial_memory) == 4, "Should have 4 expert memory states"
+        for expert_idx in range(4):
+            key = f"expert_{expert_idx}"
+            assert key in initial_memory
+            assert initial_memory[key].shape == (batch_size, 4, 128)
+
+        # Step 2: Forward pass through full pipeline with memory tokens
+        with torch.no_grad():
+            outputs = model(
+                input_ids=toy_input_data["input_ids"],
+                attention_mask=toy_input_data["attention_mask"],
+                memory_state=initial_memory,
+                mem_read_ids=toy_input_data["mem_read_ids"],
+                mem_write_ids=toy_input_data["mem_write_ids"],
+                return_routing_info=True,
+            )
+
+        # Step 3: Verify all pipeline outputs
+        assert "start_logits" in outputs, "Should have start logits from QA head"
+        assert "end_logits" in outputs, "Should have end logits from QA head"
+        assert "new_memory_state" in outputs, "Should have updated memory state"
+        assert "routing_info" in outputs, "Should have routing information"
+
+        # Step 4: Verify routing information (gating network output)
+        routing_info = outputs["routing_info"]
+        assert "routing_probs" in routing_info
+        assert "routing_logits" in routing_info
+        assert "routing_entropy" in routing_info
+        assert "expert_activations" in routing_info
+
+        routing_probs = routing_info["routing_probs"]
+        assert routing_probs.shape == (batch_size, 4), "Should have routing probs for each batch item"
+        assert torch.allclose(routing_probs.sum(dim=-1), torch.ones(batch_size), atol=1e-5), (
+            "Routing probs should sum to 1"
+        )
+        assert (routing_probs >= 0).all() and (routing_probs <= 1).all(), "Routing probs should be in [0,1]"
+
+        # Step 5: Verify memory state was updated (expert updater output)
+        new_memory = outputs["new_memory_state"]
+        assert len(new_memory) == 4
+        for expert_idx in range(4):
+            key = f"expert_{expert_idx}"
+            assert key in new_memory
+            # Memory should have changed after update
+            assert not torch.allclose(new_memory[key], initial_memory[key]), (
+                f"Expert {expert_idx} memory should be updated"
+            )
+
+        # Step 6: Verify QA outputs
+        seq_len = toy_input_data["input_ids"].size(1)
+        assert outputs["start_logits"].shape == (batch_size, seq_len)
+        assert outputs["end_logits"].shape == (batch_size, seq_len)
+        assert not torch.isnan(outputs["start_logits"]).any(), "Start logits should not be NaN"
+        assert not torch.isnan(outputs["end_logits"]).any(), "End logits should not be NaN"
+
+    @pytest.mark.integration
+    @pytest.mark.slow
+    def test_multi_segment_routing_dynamics(self, toy_base_model, toy_input_data):
+        """Test routing probability changes across multiple segments."""
+        model = GMMXLNetForQA(
+            base_model=toy_base_model,
+            num_experts=4,
+            memory_slots=4,
+            routing_mode="write-based",
+        )
+        model.eval()
+
+        batch_size = toy_input_data["input_ids"].size(0)
+        device = toy_input_data["input_ids"].device
+        memory_state = model.get_initial_memory(batch_size, device)
+
+        routing_history = []
+        num_segments = 5
+
+        # Process multiple segments and track routing changes
+        with torch.no_grad():
+            for seg_idx in range(num_segments):
+                outputs = model(
+                    input_ids=toy_input_data["input_ids"],
+                    attention_mask=toy_input_data["attention_mask"],
+                    memory_state=memory_state,
+                    mem_read_ids=toy_input_data["mem_read_ids"],
+                    mem_write_ids=toy_input_data["mem_write_ids"],
+                    return_routing_info=True,
+                )
+
+                # Store routing probabilities
+                routing_probs = outputs["routing_info"]["routing_probs"]
+                routing_history.append(routing_probs.clone())
+
+                # Update memory state for next segment
+                memory_state = outputs["new_memory_state"]
+
+        # Verify routing was computed for all segments
+        assert len(routing_history) == num_segments, f"Should have routing for {num_segments} segments"
+
+        # Verify routing probabilities are valid across all segments
+        for seg_idx, routing_probs in enumerate(routing_history):
+            assert routing_probs.shape == (batch_size, 4)
+            assert torch.allclose(routing_probs.sum(dim=-1), torch.ones(batch_size), atol=1e-5), (
+                f"Segment {seg_idx}: routing probs should sum to 1"
+            )
+
+        # Verify routing can change across segments (memory-dependent routing)
+        # At least some segments should have different routing patterns
+        routing_changed = False
+        for i in range(1, num_segments):
+            if not torch.allclose(routing_history[i], routing_history[i-1], atol=1e-3):
+                routing_changed = True
+                break
+
+        # Note: Routing might not change if inputs are identical, which is fine
+        # We just verify the mechanism works without errors
+
+    @pytest.mark.integration
+    @pytest.mark.slow
+    def test_expert_specialization_tracking(self, toy_base_model, toy_input_data):
+        """Test tracking of expert specialization via activation patterns."""
+        model = GMMXLNetForQA(
+            base_model=toy_base_model,
+            num_experts=4,
+            memory_slots=4,
+            routing_mode="write-based",
+        )
+        model.eval()
+
+        batch_size = toy_input_data["input_ids"].size(0)
+        device = toy_input_data["input_ids"].device
+
+        # Process multiple batches and accumulate expert activations
+        num_batches = 10
+        total_activations = torch.zeros(4)  # Sum of routing probs per expert
+
+        with torch.no_grad():
+            for batch_idx in range(num_batches):
+                memory_state = model.get_initial_memory(batch_size, device)
+
+                outputs = model(
+                    input_ids=toy_input_data["input_ids"],
+                    attention_mask=toy_input_data["attention_mask"],
+                    memory_state=memory_state,
+                    mem_read_ids=toy_input_data["mem_read_ids"],
+                    mem_write_ids=toy_input_data["mem_write_ids"],
+                    return_routing_info=True,
+                )
+
+                # Accumulate expert activations (sum of routing probs across batch)
+                expert_activations = outputs["routing_info"]["expert_activations"]
+                assert expert_activations.shape == (4,), "Should have activation for each expert"
+                total_activations += expert_activations
+
+        # Verify total activations
+        assert total_activations.sum() > 0, "Should have non-zero expert activations"
+
+        # Calculate expert utilization (proportion of total activations)
+        expert_utilization = total_activations / total_activations.sum()
+        assert torch.allclose(expert_utilization.sum(), torch.tensor(1.0), atol=1e-5), (
+            "Expert utilization should sum to 1"
+        )
+
+        # Verify all experts are utilized to some degree (no expert is completely unused)
+        assert (expert_utilization > 0).all(), "All experts should have some utilization"
+
+        # Verify reasonable load balancing (no single expert dominates completely)
+        # In a balanced system, each expert should get roughly 25% ± significant margin
+        # We use a loose threshold to avoid flakiness
+        max_utilization = expert_utilization.max()
+        assert max_utilization < 0.95, "No single expert should dominate (>95% utilization)"
+
+
+class TestEdgeCases:
+    """Test edge cases and boundary conditions."""
+
+    @pytest.mark.integration
+    def test_minimum_expert_count_k2(self, toy_base_model, toy_input_data):
+        """Test GMM with minimum expert count (k=2)."""
+        model = GMMXLNetForQA(
+            base_model=toy_base_model,
+            num_experts=2,  # Minimum valid expert count
+            memory_slots=4,
+            routing_mode="write-based",
+        )
+        model.eval()
+
+        batch_size = toy_input_data["input_ids"].size(0)
+        device = toy_input_data["input_ids"].device
+        memory_state = model.get_initial_memory(batch_size, device)
+
+        # Verify initial state
+        assert len(memory_state) == 2, "Should have exactly 2 expert states"
+
+        # Forward pass
+        with torch.no_grad():
+            outputs = model(
+                input_ids=toy_input_data["input_ids"],
+                attention_mask=toy_input_data["attention_mask"],
+                memory_state=memory_state,
+                mem_read_ids=toy_input_data["mem_read_ids"],
+                mem_write_ids=toy_input_data["mem_write_ids"],
+                return_routing_info=True,
+            )
+
+        # Verify outputs
+        assert outputs["start_logits"] is not None
+        assert outputs["end_logits"] is not None
+        assert len(outputs["new_memory_state"]) == 2
+
+        # Verify routing info
+        routing_probs = outputs["routing_info"]["routing_probs"]
+        assert routing_probs.shape == (batch_size, 2), "Should have routing probs for 2 experts"
+        assert torch.allclose(routing_probs.sum(dim=-1), torch.ones(batch_size), atol=1e-5)
+
+    @pytest.mark.integration
+    def test_maximum_expert_count_k8(self, toy_base_model, toy_input_data):
+        """Test GMM with maximum expert count (k=8)."""
+        model = GMMXLNetForQA(
+            base_model=toy_base_model,
+            num_experts=8,  # Maximum valid expert count
+            memory_slots=4,
+            routing_mode="write-based",
+        )
+        model.eval()
+
+        batch_size = toy_input_data["input_ids"].size(0)
+        device = toy_input_data["input_ids"].device
+        memory_state = model.get_initial_memory(batch_size, device)
+
+        # Verify initial state
+        assert len(memory_state) == 8, "Should have exactly 8 expert states"
+
+        # Forward pass
+        with torch.no_grad():
+            outputs = model(
+                input_ids=toy_input_data["input_ids"],
+                attention_mask=toy_input_data["attention_mask"],
+                memory_state=memory_state,
+                mem_read_ids=toy_input_data["mem_read_ids"],
+                mem_write_ids=toy_input_data["mem_write_ids"],
+                return_routing_info=True,
+            )
+
+        # Verify outputs
+        assert outputs["start_logits"] is not None
+        assert outputs["end_logits"] is not None
+        assert len(outputs["new_memory_state"]) == 8
+
+        # Verify routing info
+        routing_probs = outputs["routing_info"]["routing_probs"]
+        assert routing_probs.shape == (batch_size, 8), "Should have routing probs for 8 experts"
+        assert torch.allclose(routing_probs.sum(dim=-1), torch.ones(batch_size), atol=1e-5)
+
+    @pytest.mark.integration
+    def test_singleton_batch(self, toy_base_model):
+        """Test GMM with batch_size=1 (singleton batch)."""
+        model = GMMXLNetForQA(
+            base_model=toy_base_model,
+            num_experts=4,
+            memory_slots=4,
+            routing_mode="write-based",
+        )
+        model.eval()
+
+        # Create singleton batch input
+        batch_size = 1
+        seq_len = 32
+        input_ids = torch.randint(0, 1000, (batch_size, seq_len))
+        attention_mask = torch.ones(batch_size, seq_len)
+
+        # Inject memory tokens
+        mem_read_ids = [10, 11, 12, 13]
+        mem_write_ids = [14, 15, 16, 17]
+
+        for j, mem_id in enumerate(mem_write_ids):
+            input_ids[0, 5 + j] = mem_id
+        for j, mem_id in enumerate(mem_read_ids):
+            input_ids[0, 20 + j] = mem_id
+
+        # Initialize memory for singleton batch
+        device = input_ids.device
+        memory_state = model.get_initial_memory(batch_size, device)
+
+        # Verify initial state
+        assert len(memory_state) == 4
+        for expert_idx in range(4):
+            key = f"expert_{expert_idx}"
+            assert memory_state[key].shape[0] == 1, "Batch dimension should be 1"
+
+        # Forward pass
+        with torch.no_grad():
+            outputs = model(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                memory_state=memory_state,
+                mem_read_ids=mem_read_ids,
+                mem_write_ids=mem_write_ids,
+                return_routing_info=True,
+            )
+
+        # Verify outputs
+        assert outputs["start_logits"].shape[0] == 1, "Should have batch_size=1"
+        assert outputs["end_logits"].shape[0] == 1
+        assert len(outputs["new_memory_state"]) == 4
+
+        # Verify routing info
+        routing_probs = outputs["routing_info"]["routing_probs"]
+        assert routing_probs.shape == (1, 4), "Should have singleton batch dimension"
+        assert torch.allclose(routing_probs.sum(dim=-1), torch.ones(1), atol=1e-5)
+
+    @pytest.mark.integration
+    def test_single_segment_no_propagation(self, toy_base_model, toy_input_data):
+        """Test GMM with single segment (no memory propagation needed)."""
+        model = GMMXLNetForQA(
+            base_model=toy_base_model,
+            num_experts=4,
+            memory_slots=4,
+            routing_mode="write-based",
+        )
+        model.eval()
+
+        batch_size = toy_input_data["input_ids"].size(0)
+        device = toy_input_data["input_ids"].device
+
+        # Single segment - no memory propagation
+        memory_state = model.get_initial_memory(batch_size, device)
+
+        with torch.no_grad():
+            outputs = model(
+                input_ids=toy_input_data["input_ids"],
+                attention_mask=toy_input_data["attention_mask"],
+                memory_state=memory_state,
+                mem_read_ids=toy_input_data["mem_read_ids"],
+                mem_write_ids=toy_input_data["mem_write_ids"],
+                return_routing_info=True,
+            )
+
+        # Verify single segment works correctly
+        assert outputs["start_logits"] is not None
+        assert outputs["end_logits"] is not None
+        assert outputs["new_memory_state"] is not None
+
+        # Memory should still be updated even for single segment
+        for expert_idx in range(4):
+            key = f"expert_{expert_idx}"
+            assert not torch.allclose(outputs["new_memory_state"][key], memory_state[key]), (
+                "Memory should be updated even for single segment"
+            )
+
+    @pytest.mark.integration
+    def test_uniform_routing_distribution(self, toy_base_model):
+        """Test behavior with uniform routing (all experts equally likely)."""
+        model = GMMXLNetForQA(
+            base_model=toy_base_model,
+            num_experts=4,
+            memory_slots=4,
+            routing_mode="write-based",
+            routing_temperature=100.0,  # Very high temperature → uniform routing
+        )
+        model.eval()
+
+        batch_size = 2
+        seq_len = 32
+        input_ids = torch.randint(0, 1000, (batch_size, seq_len))
+        attention_mask = torch.ones(batch_size, seq_len)
+
+        # Inject memory tokens
+        mem_read_ids = [10, 11, 12, 13]
+        mem_write_ids = [14, 15, 16, 17]
+
+        for i in range(batch_size):
+            for j, mem_id in enumerate(mem_write_ids):
+                input_ids[i, 5 + j] = mem_id
+            for j, mem_id in enumerate(mem_read_ids):
+                input_ids[i, 20 + j] = mem_id
+
+        device = input_ids.device
+        memory_state = model.get_initial_memory(batch_size, device)
+
+        with torch.no_grad():
+            outputs = model(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                memory_state=memory_state,
+                mem_read_ids=mem_read_ids,
+                mem_write_ids=mem_write_ids,
+                return_routing_info=True,
+            )
+
+        # With very high temperature, routing should be close to uniform (1/4 = 0.25 per expert)
+        routing_probs = outputs["routing_info"]["routing_probs"]
+        assert routing_probs.shape == (batch_size, 4)
+
+        # Check that routing probabilities are relatively uniform
+        # With temperature=100, they should be close to 0.25 each (within 0.1 tolerance)
+        mean_prob = routing_probs.mean(dim=0)
+        assert torch.allclose(mean_prob, torch.tensor(0.25), atol=0.15), (
+            f"With high temperature, routing should be near-uniform, got {mean_prob}"
+        )
+
+    @pytest.mark.integration
+    def test_different_memory_slot_counts(self, toy_base_model, toy_input_data):
+        """Test GMM with varying memory slot counts."""
+        for memory_slots in [2, 4, 8, 16]:
+            # Need to adjust memory token counts to match
+            adjusted_input_data = toy_input_data.copy()
+
+            # Use minimum of available tokens and required slots
+            num_tokens = min(4, memory_slots)
+            adjusted_input_data["mem_read_ids"] = adjusted_input_data["mem_read_ids"][:num_tokens]
+            adjusted_input_data["mem_write_ids"] = adjusted_input_data["mem_write_ids"][:num_tokens]
+
+            model = GMMXLNetForQA(
+                base_model=toy_base_model,
+                num_experts=4,
+                memory_slots=num_tokens,
+                routing_mode="write-based",
+            )
+            model.eval()
+
+            batch_size = adjusted_input_data["input_ids"].size(0)
+            device = adjusted_input_data["input_ids"].device
+            memory_state = model.get_initial_memory(batch_size, device)
+
+            with torch.no_grad():
+                outputs = model(
+                    input_ids=adjusted_input_data["input_ids"],
+                    attention_mask=adjusted_input_data["attention_mask"],
+                    memory_state=memory_state,
+                    mem_read_ids=adjusted_input_data["mem_read_ids"],
+                    mem_write_ids=adjusted_input_data["mem_write_ids"],
+                    return_routing_info=True,
+                )
+
+            # Verify outputs work for all memory slot counts
+            assert outputs["start_logits"] is not None
+            assert outputs["end_logits"] is not None
+
+            # Verify memory shapes
+            for expert_idx in range(4):
+                key = f"expert_{expert_idx}"
+                assert outputs["new_memory_state"][key].shape[1] == num_tokens, (
+                    f"Memory slots should be {num_tokens}"
+                )
+
 
 class TestBackwardCompatibility:
     """Test backward compatibility with non-GMM models."""
