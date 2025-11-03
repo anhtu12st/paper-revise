@@ -1406,6 +1406,625 @@ def validate_memory_shapes(memory_state, expected_shape):
     return True
 ```
 
+## GMM Configuration Classes
+
+### GMMTrainingConfig
+
+**Location**: `src/gmmxlnet/training/config.py`
+
+Extended training configuration for GMM-XLNet models with multi-expert memory.
+
+```python
+@dataclass
+class GMMTrainingConfig(TrainingConfig):
+    """Training configuration for GMM-XLNet models."""
+```
+
+**Inherits From**: `TrainingConfig` (all base parameters available)
+
+**GMM-Specific Parameters**:
+
+- `use_gmm_memory` (bool, default=False): Enable GMM memory system
+- `num_memory_experts` (int, default=4): Number of memory experts k ∈ [2, 8]
+- `routing_temperature` (float, default=1.0): Temperature for routing softmax (must be > 0)
+- `routing_mode` (str, default="write-based"): Routing mode for reads ("write-based" or "read-based")
+- `entropy_regularization_weight` (float, default=0.0): Weight for entropy regularization loss (≥ 0)
+- `load_balance_weight` (float, default=0.01): Weight for load balance loss (≥ 0)
+- `expert_init_strategies` (list[str], default=None): Initialization strategy per expert (["learned", "orthogonal", "zeros"])
+
+**Methods**:
+
+#### `to_dict() -> dict[str, Any]`
+
+Serialize configuration to dictionary including GMM metadata.
+
+**Returns**:
+- `dict[str, Any]`: Dictionary with all config parameters plus `memory_type="gmm"` for GMM models
+
+#### `from_dict(config_dict: dict[str, Any]) -> GMMTrainingConfig`
+
+Deserialize configuration from dictionary.
+
+**Parameters**:
+- `config_dict` (dict): Dictionary containing configuration parameters
+
+**Returns**:
+- `GMMTrainingConfig`: Configured instance
+
+#### `to_json(filepath: str)`
+
+Save configuration to JSON file.
+
+**Parameters**:
+- `filepath` (str): Path to save JSON file
+
+#### `from_json(filepath: str) -> GMMTrainingConfig`
+
+Load configuration from JSON file.
+
+**Parameters**:
+- `filepath` (str): Path to JSON file
+
+**Returns**:
+- `GMMTrainingConfig`: Configured instance loaded from file
+
+**Example**:
+```python
+from gmmxlnet.training import GMMTrainingConfig
+
+# Create configuration
+config = GMMTrainingConfig(
+    use_gmm_memory=True,
+    num_memory_experts=4,
+    routing_temperature=1.0,
+    memory_num_tokens=16,
+    num_epochs=3,
+    batch_size=4,
+)
+
+# Save to file
+config.to_json("gmm_config.json")
+
+# Load from file
+loaded_config = GMMTrainingConfig.from_json("gmm_config.json")
+
+# Convert to dict
+config_dict = config.to_dict()
+print(config_dict["memory_type"])  # "gmm"
+```
+
+### GMM Preset Configuration Functions
+
+**Location**: `src/gmmxlnet/training/config.py`
+
+Factory functions for common GMM configurations.
+
+#### `gmm_small_config(**kwargs) -> GMMTrainingConfig`
+
+Create small GMM configuration with k=2 experts.
+
+**Ideal For**: Prototyping, limited GPU memory (< 16GB), quick experiments
+
+**Default Parameters**:
+```python
+{
+    'use_gmm_memory': True,
+    'num_memory_experts': 2,
+    'routing_temperature': 1.0,
+    'routing_mode': 'write-based',
+    'entropy_regularization_weight': 0.0,
+    'load_balance_weight': 0.01,
+}
+```
+
+**Example**:
+```python
+from gmmxlnet.training import gmm_small_config
+
+config = gmm_small_config(
+    num_epochs=3,
+    batch_size=4,
+    output_dir="outputs/gmm-small",
+)
+```
+
+#### `gmm_balanced_config(**kwargs) -> GMMTrainingConfig`
+
+Create balanced GMM configuration with k=4 experts (recommended).
+
+**Ideal For**: Most research experiments, production models, balanced capacity/cost
+
+**Default Parameters**:
+```python
+{
+    'use_gmm_memory': True,
+    'num_memory_experts': 4,
+    'routing_temperature': 1.0,
+    'routing_mode': 'write-based',
+    'entropy_regularization_weight': 0.0,
+    'load_balance_weight': 0.01,
+}
+```
+
+**Example**:
+```python
+from gmmxlnet.training import gmm_balanced_config
+
+config = gmm_balanced_config(
+    progressive_segments=[2, 4, 6],
+    num_epochs=3,
+)
+```
+
+#### `gmm_large_config(**kwargs) -> GMMTrainingConfig`
+
+Create large GMM configuration with k=8 experts.
+
+**Ideal For**: High-capacity models, large-scale experiments, maximum specialization
+
+**Default Parameters**:
+```python
+{
+    'use_gmm_memory': True,
+    'num_memory_experts': 8,
+    'routing_temperature': 1.0,
+    'routing_mode': 'write-based',
+    'entropy_regularization_weight': 0.0,
+    'load_balance_weight': 0.01,
+}
+```
+
+**Example**:
+```python
+from gmmxlnet.training import gmm_large_config
+
+config = gmm_large_config(
+    batch_size=2,  # Reduce for larger k
+    num_epochs=5,
+)
+```
+
+## GMM Model Components
+
+### GMMXLNetForQA
+
+**Location**: `src/gmmxlnet/models/gmm_xlnet_qa.py`
+
+Main model class for GMM-augmented XLNet question answering with multi-expert memory.
+
+```python
+class GMMXLNetForQA(nn.Module):
+    """GMM-augmented XLNet for QA with k independent memory experts."""
+```
+
+**Constructor Parameters**:
+
+- `base_model` (nn.Module): Pre-trained XLNet model (e.g., XLNetForQuestionAnsweringSimple)
+- `num_experts` (int, default=4): Number of memory experts k ∈ [2, 8]
+- `memory_slots` (int, default=16): Number of memory slots per expert
+- `routing_mode` (str, default="write-based"): Routing strategy ("write-based" or "read-based")
+- `routing_temperature` (float, default=1.0): Temperature for routing softmax
+- `pooling_method` (str, default="mean"): Pooling for routing ("mean", "max", "attention")
+- `init_strategies` (str | list[str], default="orthogonal"): Expert initialization strategies
+- `use_gmm_memory` (bool, default=True): Enable GMM memory
+- `mem_token_count` (int, default=16): Number of memory tokens (for compatibility)
+
+**Attributes**:
+
+- `memory_mixture` (GatedMemoryMixture): Manages k expert memory banks
+- `gating_network` (MemoryGatingNetwork): Computes routing probabilities
+- `expert_updater` (ExpertUpdater): Applies routing-modulated updates
+- `memory_reader` (AggregatedMemoryReader): Aggregates expert memories for reads
+- `base` (nn.Module): Base XLNet model
+
+**Methods**:
+
+#### `get_initial_memory(batch_size: int, device: torch.device) -> dict[str, torch.Tensor]`
+
+Initialize memory states for all k experts.
+
+**Parameters**:
+- `batch_size` (int): Batch size
+- `device` (torch.device): Target device
+
+**Returns**:
+- `dict[str, torch.Tensor]`: Dictionary mapping expert indices to memory states
+  - Keys: `"expert_0"`, `"expert_1"`, ..., `"expert_{k-1}"`
+  - Values: Tensors of shape `(batch_size, memory_slots, hidden_dim)`
+
+#### `forward(input_ids, attention_mask, token_type_ids=None, memory_state=None, ...) -> dict`
+
+Forward pass with multi-expert memory.
+
+**Parameters**:
+- `input_ids` (torch.Tensor): Input token IDs (batch, seq_len)
+- `attention_mask` (torch.Tensor): Attention mask (batch, seq_len)
+- `token_type_ids` (torch.Tensor, optional): Token type IDs
+- `memory_state` (dict[str, torch.Tensor], optional): Previous expert memory states
+- `start_positions` (torch.Tensor, optional): Ground truth start positions (training)
+- `end_positions` (torch.Tensor, optional): Ground truth end positions (training)
+
+**Returns**:
+- `dict`: Output dictionary containing:
+  - `start_logits` (torch.Tensor): Start position logits (batch, seq_len)
+  - `end_logits` (torch.Tensor): End position logits (batch, seq_len)
+  - `loss` (torch.Tensor, optional): Combined loss (if positions provided)
+  - `memory_state` (dict[str, torch.Tensor]): Updated expert memory states
+  - `routing_probs` (torch.Tensor): Routing probabilities (batch, num_experts)
+  - `auxiliary_losses` (dict, optional): Load balance and entropy losses
+
+#### `save_pretrained(save_directory: str)`
+
+Save model checkpoint to directory.
+
+**Parameters**:
+- `save_directory` (str): Path to save directory
+
+**Saves**:
+- `pytorch_model.bin`: Model weights
+- `config.json`: Model configuration including GMM parameters
+
+#### `from_pretrained(model_path: str) -> GMMXLNetForQA`
+
+Load model from checkpoint.
+
+**Parameters**:
+- `model_path` (str): Path to checkpoint directory or HuggingFace Hub ID
+
+**Returns**:
+- `GMMXLNetForQA`: Loaded model
+
+**Example**:
+```python
+from gmmxlnet.models import GMMXLNetForQA
+from transformers import XLNetForQuestionAnsweringSimple
+
+# Initialize model
+base = XLNetForQuestionAnsweringSimple.from_pretrained("xlnet-base-cased")
+model = GMMXLNetForQA(
+    base_model=base,
+    num_experts=4,
+    memory_slots=16,
+    routing_mode="write-based",
+)
+
+# Get initial memory
+memory_state = model.get_initial_memory(batch_size=4, device="cuda")
+
+# Forward pass
+outputs = model(
+    input_ids=input_ids,
+    attention_mask=attention_mask,
+    memory_state=memory_state,
+    start_positions=start_positions,  # For training
+    end_positions=end_positions,
+)
+
+# Access outputs
+loss = outputs["loss"]
+start_logits = outputs["start_logits"]
+routing_probs = outputs["routing_probs"]  # (batch, k)
+new_memory = outputs["memory_state"]  # Updated expert memories
+
+# Save model
+model.save_pretrained("outputs/gmm-model")
+
+# Load model
+loaded_model = GMMXLNetForQA.from_pretrained("outputs/gmm-model")
+```
+
+### GatedMemoryMixture
+
+**Location**: `src/gmmxlnet/models/memory_mixture.py`
+
+Manages k independent memory expert banks.
+
+```python
+class GatedMemoryMixture(nn.Module):
+    """Container for k expert memory banks."""
+```
+
+**Constructor Parameters**:
+
+- `num_experts` (int): Number of experts k
+- `memory_slots` (int): Memory slots per expert
+- `hidden_dim` (int): Hidden dimension D
+- `init_strategies` (str | list[str]): Initialization strategies
+
+**Attributes**:
+
+- `expert_memories` (nn.ParameterList): List of k expert memory parameters
+  - Each: `(memory_slots, hidden_dim)`
+
+**Methods**:
+
+#### `get_expert(expert_idx: int) -> torch.Tensor`
+
+Get memory state for expert j.
+
+**Parameters**:
+- `expert_idx` (int): Expert index j ∈ [0, k-1]
+
+**Returns**:
+- `torch.Tensor`: Expert memory state (memory_slots, hidden_dim)
+
+#### `update_expert(expert_idx: int, new_memory: torch.Tensor)`
+
+Update expert j's memory state.
+
+**Parameters**:
+- `expert_idx` (int): Expert index j
+- `new_memory` (torch.Tensor): New memory state (batch, memory_slots, hidden_dim)
+
+### MemoryGatingNetwork
+
+**Location**: `src/gmmxlnet/models/gating_network.py`
+
+Learnable routing network that computes expert selection probabilities.
+
+```python
+class MemoryGatingNetwork(nn.Module):
+    """Content-based router for expert selection."""
+```
+
+**Constructor Parameters**:
+
+- `hidden_dim` (int): Hidden dimension
+- `num_experts` (int): Number of experts k
+- `temperature` (float): Routing softmax temperature
+- `pooling_method` (str): Pooling method ("mean", "max", "attention")
+
+**Methods**:
+
+#### `forward(write_states: torch.Tensor) -> torch.Tensor`
+
+Compute routing probabilities from write token states.
+
+**Parameters**:
+- `write_states` (torch.Tensor): Write token hidden states (batch, num_mem_tokens, hidden_dim)
+
+**Returns**:
+- `torch.Tensor`: Routing probabilities (batch, num_experts), sum to 1.0
+
+### ExpertUpdater
+
+**Location**: `src/gmmxlnet/models/expert_updates.py`
+
+Applies routing-modulated gated updates to expert memories.
+
+```python
+class ExpertUpdater(nn.Module):
+    """Per-expert gated updates modulated by routing probabilities."""
+```
+
+**Constructor Parameters**:
+
+- `hidden_dim` (int): Hidden dimension
+- `num_experts` (int): Number of experts k
+
+**Methods**:
+
+#### `forward(expert_memories: list, write_states: torch.Tensor, routing_probs: torch.Tensor) -> list`
+
+Apply gated updates to all experts.
+
+**Parameters**:
+- `expert_memories` (list[torch.Tensor]): Current expert memories (k × [batch, M, D])
+- `write_states` (torch.Tensor): Write token states (batch, M, D)
+- `routing_probs` (torch.Tensor): Routing probabilities (batch, k)
+
+**Returns**:
+- `list[torch.Tensor]`: Updated expert memories (k × [batch, M, D])
+
+### AggregatedMemoryReader
+
+**Location**: `src/gmmxlnet/models/memory_read.py`
+
+Aggregates expert memories for read operations using routing-weighted combination.
+
+```python
+class AggregatedMemoryReader(nn.Module):
+    """Weighted aggregation of expert memories for reads."""
+```
+
+**Constructor Parameters**:
+
+- `hidden_dim` (int): Hidden dimension
+- `num_experts` (int): Number of experts k
+- `routing_mode` (str): Routing mode ("write-based" or "read-based")
+- `temperature` (float): Routing temperature (for read-based mode)
+- `pooling_method` (str): Pooling method (for read-based mode)
+
+**Methods**:
+
+#### `forward(expert_memories: list, routing_probs: torch.Tensor, read_states: torch.Tensor = None) -> torch.Tensor`
+
+Aggregate expert memories for read.
+
+**Parameters**:
+- `expert_memories` (list[torch.Tensor]): Expert memories (k × [batch, M, D])
+- `routing_probs` (torch.Tensor): Routing probabilities (batch, k)
+- `read_states` (torch.Tensor, optional): Read token states (for read-based mode)
+
+**Returns**:
+- `torch.Tensor`: Aggregated memory (batch, M, D)
+
+## GMM Utility Classes
+
+### GMMAnalyzer
+
+**Location**: `src/gmmxlnet/utils/gmm_analysis.py`
+
+Analyzer for GMM expert specialization, routing behavior, and interpretability.
+
+```python
+class GMMAnalyzer:
+    """Track and analyze GMM routing and expert specialization."""
+```
+
+**Constructor Parameters**:
+
+- `model` (GMMXLNetForQA): Model to analyze
+- `device` (str, optional): Device ("cuda" or "cpu", auto-detects if None)
+
+**Attributes**:
+
+- `model` (GMMXLNetForQA): The model being analyzed
+- `device` (str): Computing device
+- `routing_data` (list[dict]): Recorded routing probabilities
+- `num_experts` (int): Number of experts in model
+
+**Methods**:
+
+#### `reset_tracking()`
+
+Reset all tracked data (clears routing_data).
+
+#### `track_routing(dataloader: DataLoader, max_segments: int = None) -> dict`
+
+Track routing probabilities across evaluation dataset.
+
+**Parameters**:
+- `dataloader` (DataLoader): Evaluation dataloader
+- `max_segments` (int, optional): Maximum segments to process (None for all)
+
+**Returns**:
+- `dict`: Summary statistics containing:
+  - `expert_utilization` (list[float]): Per-expert activation rates (length k)
+  - `mean_entropy` (float): Mean routing entropy across segments
+  - `std_entropy` (float): Standard deviation of routing entropy
+  - `total_segments` (int): Total segments processed
+
+#### `compute_expert_diversity() -> np.ndarray`
+
+Compute pairwise cosine similarity between expert memory states.
+
+**Returns**:
+- `np.ndarray`: Diversity matrix (k, k) with cosine similarities
+
+**Interpretation**:
+- Diagonal = 1.0 (self-similarity)
+- Off-diagonal < 0.5: Diverse experts (good specialization)
+- Off-diagonal > 0.8: Similar experts (weak specialization)
+
+#### `compute_routing_consistency() -> float`
+
+Compute routing consistency (frequency of same expert selection).
+
+**Returns**:
+- `float`: Consistency score ∈ [0, 1]
+  - < 0.3: Highly variable (context-dependent)
+  - 0.5-0.7: Moderate
+  - > 0.8: Very consistent (may indicate collapse)
+
+#### `compute_load_balance_loss() -> float`
+
+Compute load balance loss (variance of expert utilization).
+
+**Returns**:
+- `float`: Load balance loss
+  - < 0.01: Well-balanced
+  - 0.01-0.05: Acceptable
+  - > 0.05: Imbalanced
+
+#### `compute_entropy_stats() -> dict`
+
+Compute detailed entropy statistics.
+
+**Returns**:
+- `dict`: Entropy statistics:
+  - `mean` (float): Mean entropy
+  - `std` (float): Standard deviation
+  - `min` (float): Minimum entropy
+  - `max` (float): Maximum entropy
+  - `median` (float): Median entropy
+
+**Example**:
+```python
+from gmmxlnet.utils import GMMAnalyzer
+from torch.utils.data import DataLoader
+
+# Initialize analyzer
+analyzer = GMMAnalyzer(model=model, device="cuda")
+
+# Track routing across dataset
+eval_dataloader = DataLoader(eval_dataset, batch_size=8)
+stats = analyzer.track_routing(eval_dataloader, max_segments=500)
+
+# View statistics
+print(f"Expert Utilization: {stats['expert_utilization']}")  # [0.27, 0.24, 0.26, 0.23]
+print(f"Mean Entropy: {stats['mean_entropy']:.3f}")          # 1.152
+
+# Compute additional metrics
+diversity = analyzer.compute_expert_diversity()
+print(f"Expert Diversity:\n{diversity}")
+
+consistency = analyzer.compute_routing_consistency()
+print(f"Routing Consistency: {consistency:.3f}")
+
+load_balance = analyzer.compute_load_balance_loss()
+print(f"Load Balance Loss: {load_balance:.4f}")
+```
+
+### GMM Visualization Functions
+
+**Location**: `src/gmmxlnet/utils/routing_visualization.py`
+
+Visualization utilities for GMM routing and expert analysis.
+
+#### `plot_routing_heatmap(routing_data: list, max_segments: int = 100, figsize: tuple = (12, 4)) -> Figure`
+
+Generate heatmap of routing probabilities over segments.
+
+**Parameters**:
+- `routing_data` (list[dict]): Routing data from GMMAnalyzer
+- `max_segments` (int): Maximum segments to visualize
+- `figsize` (tuple): Figure size
+
+**Returns**:
+- `matplotlib.figure.Figure`: Heatmap figure
+
+#### `plot_expert_utilization(utilization: list[float], figsize: tuple = (8, 5)) -> Figure`
+
+Generate bar chart of expert utilization rates.
+
+**Parameters**:
+- `utilization` (list[float]): Per-expert utilization rates (length k)
+- `figsize` (tuple): Figure size
+
+**Returns**:
+- `matplotlib.figure.Figure`: Bar chart figure
+
+#### `plot_entropy_timeline(routing_data: list, figsize: tuple = (12, 4)) -> Figure`
+
+Generate timeline plot of routing entropy over segments.
+
+**Parameters**:
+- `routing_data` (list[dict]): Routing data from GMMAnalyzer
+- `figsize` (tuple): Figure size
+
+**Returns**:
+- `matplotlib.figure.Figure`: Timeline figure
+
+**Example**:
+```python
+from gmmxlnet.utils import (
+    plot_routing_heatmap,
+    plot_expert_utilization,
+    plot_entropy_timeline,
+)
+
+# Generate visualizations
+heatmap_fig = plot_routing_heatmap(analyzer.routing_data, max_segments=100)
+heatmap_fig.savefig("routing_heatmap.png")
+
+utilization_fig = plot_expert_utilization(stats['expert_utilization'])
+utilization_fig.savefig("expert_utilization.png")
+
+entropy_fig = plot_entropy_timeline(analyzer.routing_data)
+entropy_fig.savefig("entropy_timeline.png")
+```
+
 ## Best Practices
 
 ### Performance Optimization

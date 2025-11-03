@@ -1,6 +1,6 @@
 # MemXLNet-QA: Memory-Augmented XLNet for Long-Context QA
 
-A memory-augmented XLNet implementation for long-form document question answering, featuring explicit memory tokens, time-step-major batching, and progressive training for improved performance on SQuAD v2 and similar datasets.
+A memory-augmented XLNet implementation for long-form document question answering, featuring explicit memory tokens, time-step-major batching, and progressive training for improved performance on SQuAD v2 and similar datasets. Includes advanced multi-expert memory (GMM) for increased capacity and interpretability.
 
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![PyTorch 2.8+](https://img.shields.io/badge/PyTorch-2.8+-ee4c2c.svg)](https://pytorch.org/)
@@ -12,6 +12,7 @@ A memory-augmented XLNet implementation for long-form document question answerin
 - **Time-Step-Major Batching** - Novel batching strategy ensuring proper memory state propagation
 - **Gated Memory Updates** - Learnable gates for stable memory updates across segments
 - **Progressive Training** - Curriculum learning with increasing document complexity
+- **Multi-Expert Memory (GMM)** - Advanced architecture with k independent memory experts and learned routing (NEW)
 - **SQuAD v2 Ready** - Robust no-answer handling with calibrated thresholds
 - **Production Ready** - Complete package with tests, documentation, and examples
 
@@ -91,6 +92,30 @@ Critical innovation for proper memory propagation:
 
 **Learn more:** [Data Processing](docs/technical/DATA_PROCESSING.md)
 
+### Multi-Expert Memory (GMM)
+
+Advanced feature for increased memory capacity and specialization:
+
+```python
+from gmmxlnet.models import GMMXLNetForQA
+from gmmxlnet.training import gmm_balanced_config
+
+# Train with 4 expert memories
+config = gmm_balanced_config(
+    num_memory_experts=4,      # k=4 expert memories
+    memory_num_tokens=16,      # 16 slots per expert
+    routing_temperature=1.0,   # Balanced routing
+)
+
+# Analyze expert specialization
+from gmmxlnet.utils import GMMAnalyzer
+analyzer = GMMAnalyzer(model=model)
+routing_stats = analyzer.track_routing(eval_dataloader)
+print(f"Expert Utilization: {routing_stats['expert_utilization']}")
+```
+
+**Learn more:** [GMM XLNet Guide](docs/guides/GMM_XLNET_GUIDE.md)
+
 ## 📖 Usage Example
 
 ```python
@@ -150,12 +175,17 @@ model = MemXLNetForQA.from_pretrained("./outputs/my-model")
 ### Core Components
 
 ```
-src/memxlnet/
-├── models/          # MemXLNetForQA and memory modules
-├── data/            # Dataset processing and time-step-major batching
-├── training/        # Training orchestration and progressive training
-├── evaluation/      # Evaluation pipeline and metrics
-└── utils/           # Utilities and helpers
+src/
+├── memxlnet/          # Base MemXLNet package
+│   ├── models/        # MemXLNetForQA and memory modules
+│   ├── data/          # Dataset processing and time-step-major batching
+│   ├── training/      # Training orchestration and progressive training
+│   ├── evaluation/    # Evaluation pipeline and metrics
+│   └── utils/         # Utilities and helpers
+└── gmmxlnet/          # GMM multi-expert extension
+    ├── models/        # GMMXLNetForQA and expert components
+    ├── training/      # GMM training configuration
+    └── utils/         # GMM analysis and visualization
 ```
 
 ### Key Design Patterns
@@ -190,16 +220,17 @@ print('✅ All imports successful')
 ## 📊 Project Structure
 
 ```
-memxlnet-qa/
-├── src/memxlnet/          # Main package
-├── scripts/               # Executable scripts
-├── tests/                 # Test suite
+paper-revise/
+├── src/
+│   ├── memxlnet/          # Base MemXLNet package
+│   └── gmmxlnet/          # GMM multi-expert extension
+├── scripts/               # Training and evaluation scripts
+├── tests/                 # Comprehensive test suite
 ├── docs/                  # Documentation
 │   ├── api/              # API documentation
-│   ├── guides/           # User guides
+│   ├── guides/           # User guides (inc. GMM guide)
 │   └── technical/        # Technical docs
-├── notebooks/             # Interactive analysis
-├── examples/              # Usage examples
+├── examples/              # Usage examples (inc. GMM training)
 ├── pyproject.toml         # Package configuration
 └── README.md             # This file
 ```
@@ -235,12 +266,14 @@ MemXLNet addresses these through:
 1. **Explicit Memory Tokens** - Replace implicit recurrence with controllable read/write
 2. **Time-Step-Major Processing** - Ensure proper memory state flow
 3. **Progressive Training** - Curriculum learning with increasing complexity
-4. **Robust Calibration** - Conservative no-answer handling for SQuAD v2
+4. **Multi-Expert Memory (GMM)** - k independent expert memories for increased capacity
+5. **Robust Calibration** - Conservative no-answer handling for SQuAD v2
 
 ### Results
 - Strong answer quality on long documents
 - Improved no-answer calibration vs. segment-independent processing
 - Efficient memory usage through gated updates
+- GMM enables expert specialization and increased memory capacity
 
 ## 🐛 Troubleshooting
 

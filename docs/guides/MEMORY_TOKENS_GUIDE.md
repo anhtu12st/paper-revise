@@ -1008,4 +1008,365 @@ class MemoryTokenCache:
         return self.position_cache[key]
 ```
 
-This comprehensive guide provides the foundation for understanding and implementing the memory token system in MemXLNet-QA. The memory mechanism is crucial for the model's ability to handle long documents effectively while maintaining state across segments.
+## GMM Memory Architecture
+
+The **Gated Memory Mixture (GMM)** extension introduces a multi-expert memory system that builds upon the memory token architecture described above. Instead of a single flat memory bank, GMM maintains **k independent memory experts** that specialize through learned routing.
+
+### Comparison: Token-Based vs. Differentiable vs. GMM Memory
+
+| Feature | Token-Based Memory | Differentiable Memory | GMM Memory |
+|---------|-------------------|----------------------|------------|
+| **Architecture** | Explicit tokens interface | Single learnable bank | k expert banks |
+| **Memory Type** | `[MEM_READ/WRITE]` tokens | Content-based addressing | Multi-expert with routing |
+| **Capacity** | Fixed by token count | Fixed by slot count | k× slot count |
+| **Specialization** | None | None | Automatic via gating network |
+| **Update Mechanism** | Token-based gates | Multi-head attention | Routing-modulated gates |
+| **Read Mechanism** | Token embeddings | Attention-weighted | Routing-weighted aggregation |
+| **Interpretability** | High (token-level) | Medium (attention) | High (routing + attention) |
+| **Training Stability** | High | Medium | High (with load balancing) |
+
+### GMM Architecture Components
+
+GMM extends the memory token system with four key components:
+
+#### 1. Multiple Memory Experts (GatedMemoryMixture)
+
+Instead of a single memory bank, GMM maintains k expert memories:
+
+```python
+# Single Memory (Base)
+memory_state = torch.zeros(batch_size, memory_num_tokens, hidden_dim)
+
+# Multi-Expert Memory (GMM)
+expert_memories = {
+    "expert_0": torch.zeros(batch_size, memory_num_tokens, hidden_dim),
+    "expert_1": torch.zeros(batch_size, memory_num_tokens, hidden_dim),
+    "expert_2": torch.zeros(batch_size, memory_num_tokens, hidden_dim),
+    "expert_3": torch.zeros(batch_size, memory_num_tokens, hidden_dim),
+}
+```
+
+**Key Properties**:
+- Each expert has identical shape: `(batch_size, memory_slots, hidden_dim)`
+- Experts are initialized with orthogonal or learned initialization
+- Experts specialize through differential routing during training
+
+#### 2. Learnable Gating Network (MemoryGatingNetwork)
+
+The gating network computes routing probabilities from write token representations:
+
+```python
+# Extract write token hidden states (from context)
+write_states = hidden_states[:, write_token_positions, :]  # (batch, M, D)
+
+# Compute routing probabilities
+routing_probs = gating_network(write_states)  # (batch, k)
+# routing_probs.sum(dim=-1) == 1.0 (softmax normalized)
+```
+
+**Routing Computation**:
+1. **Pooling**: Aggregate write token states (mean/max/attention pooling)
+2. **Linear Transform**: Map pooled state to k logits
+3. **Temperature Softmax**: Apply temperature-scaled softmax for routing probs
+
+**Temperature Effects**:
+- **High T (> 1.0)**: Soft routing, multiple experts activated
+- **Low T (< 1.0)**: Sharp routing, single expert dominates
+- **T = 1.0**: Balanced (default)
+
+#### 3. Routing-Modulated Updates (ExpertUpdater)
+
+Expert updates are gated and modulated by routing probabilities:
+
+```python
+for expert_idx in range(num_experts):
+    # Compute expert-specific gate
+    gate_j = sigmoid(gate_network_j(write_states))  # (batch, M, 1)
+
+    # Modulate by routing probability
+    routing_weight = routing_probs[:, expert_idx: expert_idx+1]  # (batch, 1)
+    effective_gate = routing_weight.unsqueeze(1) * gate_j  # (batch, M, 1)
+
+    # Gated update
+    expert_memories[f"expert_{expert_idx}"] = (
+        (1 - effective_gate) * expert_memories[f"expert_{expert_idx}"] +
+        effective_gate * write_states
+    )
+```
+
+**Key Properties**:
+- **Soft Gating**: Gradual updates prevent catastrophic forgetting
+- **Routing Modulation**: Low-probability experts receive minimal updates
+- **Specialization**: Experts learn distinct update patterns
+
+#### 4. Aggregated Memory Reads (AggregatedMemoryReader)
+
+For read operations, expert memories are combined using routing weights:
+
+**Write-Based Routing** (default, efficient):
+```python
+# Reuse write routing probabilities
+read_memory = torch.zeros_like(expert_memories["expert_0"])
+for expert_idx in range(num_experts):
+    routing_weight = routing_probs[:, expert_idx: expert_idx+1].unsqueeze(1)
+    read_memory += routing_weight * expert_memories[f"expert_{expert_idx}"]
+
+# Replace [MEM_READ] token embeddings with aggregated memory
+embeddings[:, read_token_positions, :] = read_memory
+```
+
+**Read-Based Routing** (adaptive):
+```python
+# Compute separate routing from read tokens (in question)
+read_states = hidden_states[:, read_token_positions, :]
+read_routing_probs = gating_network(read_states)
+
+# Aggregate using read-specific routing
+read_memory = torch.zeros_like(expert_memories["expert_0"])
+for expert_idx in range(num_experts):
+    routing_weight = read_routing_probs[:, expert_idx: expert_idx+1].unsqueeze(1)
+    read_memory += routing_weight * expert_memories[f"expert_{expert_idx}"]
+```
+
+### GMM Memory Token Flow
+
+The GMM system integrates seamlessly with the memory token architecture:
+
+```
+Input Segment (XLNet Format):
+[PAD] [PAD] ... [Context] [MEM_WRITE_0..M-1] [SEP] [MEM_READ_0..M-1] [Question] [SEP] [CLS]
+
+                    ↓ XLNet Encoder ↓
+
+Write Token States                         Read Token States
+      ↓                                           ↓
+MemoryGatingNetwork                        (Optional: Read-Based Routing)
+      ↓                                           ↓
+routing_probs: [p_0, p_1, p_2, p_3]        read_routing_probs
+      ↓                                           ↓
+ExpertUpdater                              AggregatedMemoryReader
+      ↓                                           ↓
+expert_0: updated with weight p_0          aggregated_memory = Σ p_j * expert_j
+expert_1: updated with weight p_1                ↓
+expert_2: updated with weight p_2          Replace [MEM_READ] embeddings
+expert_3: updated with weight p_3                ↓
+                                           Continue forward pass
+```
+
+### Using GMM Memory
+
+#### Basic GMM Setup
+
+```python
+from gmmxlnet.models import GMMXLNetForQA
+from gmmxlnet.training import GMMTrainingConfig
+from transformers import XLNetForQuestionAnsweringSimple, XLNetTokenizerFast
+
+# Load base model
+base_model = XLNetForQuestionAnsweringSimple.from_pretrained("xlnet-base-cased")
+
+# Initialize tokenizer with memory tokens (same as standard memory)
+tokenizer = XLNetTokenizerFast.from_pretrained("xlnet-base-cased")
+memory_num_tokens = 16
+tokenizer.add_special_tokens({
+    "additional_special_tokens": [
+        f"[MEM_READ_{i}]" for i in range(memory_num_tokens)
+    ] + [
+        f"[MEM_WRITE_{i}]" for i in range(memory_num_tokens)
+    ]
+})
+
+# Resize model embeddings (same as standard memory)
+base_model.resize_token_embeddings(len(tokenizer))
+
+# Wrap with GMM
+model = GMMXLNetForQA(
+    base_model=base_model,
+    num_experts=4,
+    memory_slots=memory_num_tokens,
+    routing_mode="write-based",
+    routing_temperature=1.0,
+)
+
+# Initialize expert memories
+expert_memories = model.get_initial_memory(batch_size=4, device="cuda")
+```
+
+#### GMM Forward Pass
+
+```python
+# Forward pass with multi-expert memory
+outputs = model(
+    input_ids=input_ids,
+    attention_mask=attention_mask,
+    memory_state=expert_memories,  # Dict of expert memories
+    start_positions=start_positions,
+    end_positions=end_positions,
+)
+
+# Access outputs
+loss = outputs["loss"]
+start_logits = outputs["start_logits"]
+end_logits = outputs["end_logits"]
+routing_probs = outputs["routing_probs"]  # (batch, num_experts)
+updated_expert_memories = outputs["memory_state"]  # Dict of updated experts
+```
+
+### GMM Training Configuration
+
+```python
+from gmmxlnet.training import GMMTrainingConfig, gmm_balanced_config
+
+# Option 1: Full configuration
+config = GMMTrainingConfig(
+    use_gmm_memory=True,
+    num_memory_experts=4,
+    memory_num_tokens=16,
+    routing_temperature=1.0,
+    routing_mode="write-based",
+    load_balance_weight=0.01,
+    entropy_regularization_weight=0.0,
+    # ... base MemXLNet parameters
+    progressive_segments=[2, 4, 6],
+    num_epochs=3,
+    batch_size=4,
+)
+
+# Option 2: Preset configuration
+config = gmm_balanced_config(
+    memory_num_tokens=16,
+    progressive_segments=[2, 4],
+    num_epochs=3,
+)
+```
+
+### GMM Specialization Analysis
+
+GMM provides rich interpretability through routing analysis:
+
+```python
+from gmmxlnet.utils import GMMAnalyzer
+from torch.utils.data import DataLoader
+
+# Initialize analyzer
+analyzer = GMMAnalyzer(model=model, device="cuda")
+
+# Track routing across dataset
+eval_dataloader = DataLoader(eval_dataset, batch_size=8)
+routing_stats = analyzer.track_routing(eval_dataloader, max_segments=500)
+
+# View specialization metrics
+print(f"Expert Utilization: {routing_stats['expert_utilization']}")
+# Example: [0.27, 0.24, 0.26, 0.23] - balanced specialization
+
+print(f"Mean Routing Entropy: {routing_stats['mean_entropy']:.3f}")
+# Example: 1.152 - moderate entropy (good balance)
+
+# Compute expert diversity
+diversity_matrix = analyzer.compute_expert_diversity()
+print(f"Expert Diversity:\n{diversity_matrix}")
+# Off-diagonal < 0.5 indicates good specialization
+```
+
+### GMM Best Practices
+
+#### 1. Start with Balanced Configuration
+
+```python
+# Recommended starting point
+config = gmm_balanced_config(
+    num_memory_experts=4,        # Balanced capacity
+    routing_temperature=1.0,     # Balanced routing
+    load_balance_weight=0.01,    # Standard load balancing
+)
+```
+
+#### 2. Monitor Routing Health
+
+```python
+class GMMTrainingMonitor:
+    def __init__(self, model):
+        self.model = model
+        self.routing_history = []
+
+    def log_routing(self, routing_probs):
+        """Log routing probabilities during training."""
+        # Convert to numpy
+        probs = routing_probs.detach().cpu().numpy()
+
+        # Compute metrics
+        expert_util = probs.mean(axis=0)  # Average activation per expert
+        entropy = -(probs * np.log(probs + 1e-10)).sum(axis=1).mean()
+
+        self.routing_history.append({
+            'expert_utilization': expert_util,
+            'entropy': entropy,
+        })
+
+        # Warn if routing collapses
+        if expert_util.max() > 0.8:
+            print(f"Warning: Expert collapse detected. Max utilization: {expert_util.max():.2f}")
+
+        return expert_util, entropy
+```
+
+#### 3. Tune Routing Temperature
+
+```python
+# If expert collapse (one expert dominates)
+config.routing_temperature = 1.5  # Soften routing
+
+# If no specialization (all experts equal)
+config.routing_temperature = 0.7  # Sharpen routing
+```
+
+#### 4. Memory Token Placement (Same as Standard Memory)
+
+GMM uses the same memory token placement strategy as standard memory:
+
+```python
+# XLNet format: [PAD] ... [Context] [MEM_WRITE] [SEP] [MEM_READ] [Question] [SEP] [CLS]
+#                                         ↑                           ↑
+#                               Write to experts              Read from experts
+
+# Ensure correct placement in dataset processing
+def add_memory_tokens_gmm(context_ids, question_ids, mem_read_ids, mem_write_ids):
+    """Add memory tokens for GMM (same as standard memory)."""
+    sequence = (
+        context_ids +
+        mem_write_ids +  # Write tokens after context
+        [sep_token_id] +
+        mem_read_ids +   # Read tokens before question
+        question_ids +
+        [sep_token_id, cls_token_id]
+    )
+    return sequence
+```
+
+### When to Use GMM vs. Standard Memory
+
+**Use Standard Token-Based Memory When**:
+- Simplicity and interpretability are priorities
+- Limited computational resources (< 16GB GPU)
+- Baseline model for comparison
+
+**Use Differentiable Memory When**:
+- Need content-based addressing within single memory
+- Attention-based memory access is preferred
+- Moderate capacity requirements
+
+**Use GMM Memory When**:
+- Maximum memory capacity is needed
+- Expert specialization is desired for interpretability
+- Sufficient computational resources (16GB+ GPU)
+- Research into mixture-of-experts memory systems
+
+### Further Reading
+
+- **[GMM XLNet Guide](GMM_XLNET_GUIDE.md)**: Comprehensive guide to GMM-XLNet architecture, training, and analysis
+- **[API Reference](../api/API_REFERENCE.md)**: Complete API documentation for GMM classes
+- **[GMM Examples](../../examples/)**: Training and analysis examples
+
+---
+
+This comprehensive guide provides the foundation for understanding and implementing the memory token system in MemXLNet-QA, including the advanced GMM multi-expert extension. The memory mechanism is crucial for the model's ability to handle long documents effectively while maintaining state across segments.
