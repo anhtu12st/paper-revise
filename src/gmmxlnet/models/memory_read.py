@@ -5,7 +5,7 @@ Implements weighted aggregation of expert memories for read operations,
 allowing memory read tokens to access collective knowledge from all specialized experts.
 """
 
-from typing import Literal, Optional
+from typing import Literal
 
 import torch
 import torch.nn as nn
@@ -82,7 +82,7 @@ class AggregatedMemoryReader(nn.Module):
         self.routing_mode = routing_mode
 
         # Initialize read-specific gating network if using read-based routing
-        self.read_gating_network: Optional[MemoryGatingNetwork] = None
+        self.read_gating_network: MemoryGatingNetwork | None = None
         if routing_mode == "read-based":
             self.read_gating_network = MemoryGatingNetwork(
                 hidden_dim=hidden_dim,
@@ -94,8 +94,8 @@ class AggregatedMemoryReader(nn.Module):
     def forward(
         self,
         expert_states: list[torch.Tensor],
-        routing_probs: Optional[torch.Tensor] = None,
-        read_hiddens: Optional[torch.Tensor] = None,
+        routing_probs: torch.Tensor | None = None,
+        read_hiddens: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """
         Aggregate expert memories using weighted sum.
@@ -121,9 +121,11 @@ class AggregatedMemoryReader(nn.Module):
         # Get routing probabilities
         if self.routing_mode == "write-based":
             # Reuse cached routing from write operation
+            assert routing_probs is not None, "routing_probs required for write-based mode"
             probs = routing_probs
         else:
             # Compute new routing for read queries
+            assert read_hiddens is not None, "read_hiddens required for read-based mode"
             probs = self.compute_read_routing(read_hiddens)
 
         # Compute weighted aggregation
@@ -148,8 +150,7 @@ class AggregatedMemoryReader(nn.Module):
         """
         if self.routing_mode != "read-based":
             raise RuntimeError(
-                f"compute_read_routing() only available in read-based mode, "
-                f"current mode is '{self.routing_mode}'"
+                f"compute_read_routing() only available in read-based mode, current mode is '{self.routing_mode}'"
             )
 
         if self.read_gating_network is None:
@@ -159,7 +160,8 @@ class AggregatedMemoryReader(nn.Module):
             )
 
         # Compute routing using read-specific gating network
-        routing_probs, _, _ = self.read_gating_network(read_hiddens)
+        routing_result = self.read_gating_network(read_hiddens)
+        routing_probs = torch.as_tensor(routing_result[0])
         return routing_probs
 
     def _aggregate_experts(
@@ -283,7 +285,7 @@ class AggregatedMemoryReader(nn.Module):
         # Replace embeddings at read positions
         for batch_idx in range(batch_size):
             for mem_idx in range(num_read_tokens):
-                pos = read_positions[batch_idx, mem_idx].item()
+                pos = int(read_positions[batch_idx, mem_idx].item())
                 modified_output[batch_idx, pos, :] = aggregated_memory[batch_idx, mem_idx, :]
 
         return modified_output
@@ -291,8 +293,8 @@ class AggregatedMemoryReader(nn.Module):
     def _validate_inputs(
         self,
         expert_states: list[torch.Tensor],
-        routing_probs: Optional[torch.Tensor],
-        read_hiddens: Optional[torch.Tensor],
+        routing_probs: torch.Tensor | None,
+        read_hiddens: torch.Tensor | None,
     ) -> None:
         """
         Validate inputs based on routing mode.
@@ -307,9 +309,7 @@ class AggregatedMemoryReader(nn.Module):
         """
         # Validate expert_states
         if not isinstance(expert_states, list):
-            raise ValueError(
-                f"expert_states must be a list, got {type(expert_states).__name__}"
-            )
+            raise ValueError(f"expert_states must be a list, got {type(expert_states).__name__}")
         if len(expert_states) != self.num_experts:
             raise ValueError(
                 f"expert_states must contain {self.num_experts} experts, got {len(expert_states)}. "
@@ -320,14 +320,13 @@ class AggregatedMemoryReader(nn.Module):
         if self.routing_mode == "write-based":
             if routing_probs is None:
                 raise ValueError(
-                    f"routing_probs required for write-based routing mode. "
-                    f"Provide routing probabilities from write operation."
+                    "routing_probs required for write-based routing mode. "
+                    "Provide routing probabilities from write operation."
                 )
             # Validate routing_probs shape
             if routing_probs.dim() != 2:
                 raise ValueError(
-                    f"routing_probs must be 2D (batch_size, num_experts), "
-                    f"got {routing_probs.dim()}D tensor"
+                    f"routing_probs must be 2D (batch_size, num_experts), got {routing_probs.dim()}D tensor"
                 )
             batch_size = expert_states[0].shape[0]
             if routing_probs.shape != (batch_size, self.num_experts):
@@ -338,20 +337,18 @@ class AggregatedMemoryReader(nn.Module):
         else:  # read-based
             if read_hiddens is None:
                 raise ValueError(
-                    f"read_hiddens required for read-based routing mode. "
-                    f"Provide read query hidden states for routing computation."
+                    "read_hiddens required for read-based routing mode. "
+                    "Provide read query hidden states for routing computation."
                 )
             # Validate read_hiddens shape
             if read_hiddens.dim() != 3:
                 raise ValueError(
-                    f"read_hiddens must be 3D (batch_size, memory_slots, hidden_dim), "
-                    f"got {read_hiddens.dim()}D tensor"
+                    f"read_hiddens must be 3D (batch_size, memory_slots, hidden_dim), got {read_hiddens.dim()}D tensor"
                 )
             batch_size, memory_slots, hidden_dim = read_hiddens.shape
             if hidden_dim != self.hidden_dim:
                 raise ValueError(
-                    f"read_hiddens hidden_dim must be {self.hidden_dim}, got {hidden_dim}. "
-                    f"Configuration mismatch."
+                    f"read_hiddens hidden_dim must be {self.hidden_dim}, got {hidden_dim}. Configuration mismatch."
                 )
 
         # Validate all expert states have consistent shapes

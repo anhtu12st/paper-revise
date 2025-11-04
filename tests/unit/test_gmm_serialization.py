@@ -354,9 +354,7 @@ class TestSaveLoadRoundTrip:
     def test_round_trip_preserves_routing_parameters(self, gmm_model, temp_checkpoint_dir):
         """Test that save/load round-trip preserves routing network parameters."""
         # Get initial routing parameters
-        initial_routing_params = {
-            k: v.clone() for k, v in gmm_model.gating_network.state_dict().items()
-        }
+        initial_routing_params = {k: v.clone() for k, v in gmm_model.gating_network.state_dict().items()}
 
         # Save and load
         save_path = os.path.join(temp_checkpoint_dir, "test_model")
@@ -373,9 +371,7 @@ class TestSaveLoadRoundTrip:
             # Verify routing parameters are preserved
             loaded_routing_params = loaded_model.gating_network.state_dict()
             for key in initial_routing_params:
-                assert torch.allclose(
-                    initial_routing_params[key], loaded_routing_params[key], atol=1e-6
-                )
+                assert torch.allclose(initial_routing_params[key], loaded_routing_params[key], atol=1e-6)
 
 
 @pytest.mark.unit

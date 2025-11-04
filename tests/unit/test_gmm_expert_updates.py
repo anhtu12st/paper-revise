@@ -300,8 +300,7 @@ class TestGradientFlow:
         updater = ExpertUpdater(hidden_dim=768, num_experts=4)
 
         batch_size, memory_slots, hidden_dim = 4, 8, 768
-        expert_states = [torch.randn(batch_size, memory_slots, hidden_dim, requires_grad=True)
-                        for _ in range(4)]
+        expert_states = [torch.randn(batch_size, memory_slots, hidden_dim, requires_grad=True) for _ in range(4)]
         write_hiddens = torch.randn(batch_size, memory_slots, hidden_dim, requires_grad=True)
         routing_probs = torch.softmax(torch.randn(batch_size, 4, requires_grad=True), dim=-1)
 
@@ -397,8 +396,7 @@ class TestUpdateConsistency:
         updater = ExpertUpdater(hidden_dim=768, num_experts=num_experts)
 
         batch_size, memory_slots, hidden_dim = 8, 16, 768
-        expert_states = [torch.randn(batch_size, memory_slots, hidden_dim)
-                        for _ in range(num_experts)]
+        expert_states = [torch.randn(batch_size, memory_slots, hidden_dim) for _ in range(num_experts)]
         write_hiddens = torch.randn(batch_size, memory_slots, hidden_dim)
         routing_probs = torch.softmax(torch.randn(batch_size, num_experts), dim=-1)
 

@@ -511,13 +511,6 @@ class TestGMMXLNetIntegration:
             )
 
         # Verify routing can change across segments (memory-dependent routing)
-        # At least some segments should have different routing patterns
-        routing_changed = False
-        for i in range(1, num_segments):
-            if not torch.allclose(routing_history[i], routing_history[i-1], atol=1e-3):
-                routing_changed = True
-                break
-
         # Note: Routing might not change if inputs are identical, which is fine
         # We just verify the mechanism works without errors
 
@@ -846,9 +839,7 @@ class TestEdgeCases:
             # Verify memory shapes
             for expert_idx in range(4):
                 key = f"expert_{expert_idx}"
-                assert outputs["new_memory_state"][key].shape[1] == num_tokens, (
-                    f"Memory slots should be {num_tokens}"
-                )
+                assert outputs["new_memory_state"][key].shape[1] == num_tokens, f"Memory slots should be {num_tokens}"
 
 
 class TestBackwardCompatibility:

@@ -8,16 +8,12 @@ Tests full evaluation workflow to verify:
 - Routing statistics are collected correctly
 """
 
-import tempfile
-from pathlib import Path
-
 import pytest
 import torch
 from torch.utils.data import Dataset
 from transformers import XLNetConfig, XLNetForQuestionAnsweringSimple
 
 from gmmxlnet.models.gmm_xlnet_qa import GMMXLNetForQA
-from gmmxlnet.training import GMMTrainingConfig
 
 
 class ToyEvalDataset(Dataset):
@@ -239,12 +235,6 @@ class TestGMMEvaluation:
 
         with torch.no_grad():
             for idx in range(len(toy_eval_dataset)):
-                example = toy_eval_dataset[idx]
-
-                # Process first segment
-                input_ids = example["input_ids"][0].unsqueeze(0)
-                attention_mask = example["attention_mask"][0].unsqueeze(0)
-
                 # Mock: Compute routing probabilities
                 # In real evaluation, this would be extracted from model forward pass
                 batch_size = 1
@@ -255,16 +245,12 @@ class TestGMMEvaluation:
                 routing_probs_history.append(routing_probs)
 
         # Verify routing statistics
-        assert len(routing_probs_history) == len(toy_eval_dataset), (
-            "Should collect routing probs for each example"
-        )
+        assert len(routing_probs_history) == len(toy_eval_dataset), "Should collect routing probs for each example"
 
         for routing_probs in routing_probs_history:
             # Verify routing probabilities are valid
             assert routing_probs.shape[1] == 4, f"Should have 4 experts, got shape {routing_probs.shape}"
-            assert torch.allclose(routing_probs.sum(dim=-1), torch.ones(1), atol=1e-5), (
-                "Routing probs should sum to 1"
-            )
+            assert torch.allclose(routing_probs.sum(dim=-1), torch.ones(1), atol=1e-5), "Routing probs should sum to 1"
             assert not torch.isnan(routing_probs).any(), "Routing probs should not be NaN"
             assert (routing_probs >= 0).all(), "Routing probs should be non-negative"
             assert (routing_probs <= 1).all(), "Routing probs should be <= 1"

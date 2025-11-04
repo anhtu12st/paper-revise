@@ -241,7 +241,7 @@ class GMMAnalyzer:
 
         # Average off-diagonal elements (exclude self-similarity)
         k = similarities.size(0)
-        mask = ~torch.eye(k, dtype=bool, device=similarities.device)
+        mask = ~torch.eye(k, dtype=torch.bool, device=similarities.device)
         diversity = 1.0 - similarities[mask].mean().item()
 
         # Clamp to [0, 1] for numerical stability
@@ -360,7 +360,7 @@ class GMMAnalyzer:
 
         # Convert to numpy and compute linkage
         embeddings_np = expert_embeddings.cpu().numpy()
-        linkage_matrix = linkage(embeddings_np, method=method)
+        linkage_matrix: np.ndarray = linkage(embeddings_np, method=method)
 
         return linkage_matrix
 

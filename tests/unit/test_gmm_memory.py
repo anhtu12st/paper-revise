@@ -21,9 +21,7 @@ class TestGatedMemoryMixtureInitialization:
 
     def test_valid_configuration(self):
         """Test valid GMM configuration."""
-        gmm = GatedMemoryMixture(
-            num_experts=4, memory_slots=16, hidden_dim=768, init_strategies="learned"
-        )
+        gmm = GatedMemoryMixture(num_experts=4, memory_slots=16, hidden_dim=768, init_strategies="learned")
         assert gmm.num_experts == 4
         assert gmm.memory_slots == 16
         assert gmm.hidden_dim == 768
@@ -31,16 +29,12 @@ class TestGatedMemoryMixtureInitialization:
     def test_invalid_num_experts_too_low(self):
         """Test that num_experts < 2 raises ValueError."""
         with pytest.raises(ValueError, match="num_experts must be power of 2 in \\[2, 8\\]"):
-            GatedMemoryMixture(
-                num_experts=1, memory_slots=16, hidden_dim=768, init_strategies="learned"
-            )
+            GatedMemoryMixture(num_experts=1, memory_slots=16, hidden_dim=768, init_strategies="learned")
 
     def test_invalid_num_experts_too_high(self):
         """Test that num_experts > 8 raises ValueError."""
         with pytest.raises(ValueError, match="num_experts must be power of 2 in \\[2, 8\\]"):
-            GatedMemoryMixture(
-                num_experts=9, memory_slots=16, hidden_dim=768, init_strategies="learned"
-            )
+            GatedMemoryMixture(num_experts=9, memory_slots=16, hidden_dim=768, init_strategies="learned")
 
     @pytest.mark.parametrize("num_experts", [3, 5, 6, 7])
     def test_invalid_non_power_of_2_experts(self, num_experts):
@@ -56,9 +50,7 @@ class TestGatedMemoryMixtureInitialization:
     def test_invalid_init_strategy(self):
         """Test that invalid init_strategy raises ValueError."""
         with pytest.raises(ValueError, match="Invalid init_strategy"):
-            GatedMemoryMixture(
-                num_experts=4, memory_slots=16, hidden_dim=768, init_strategies="invalid"
-            )
+            GatedMemoryMixture(num_experts=4, memory_slots=16, hidden_dim=768, init_strategies="invalid")
 
     def test_mismatched_init_strategies_length(self):
         """Test that init_strategies length must match num_experts."""
@@ -89,9 +81,7 @@ class TestInitializationStrategies:
 
     def test_learned_initialization(self):
         """Test learned initialization strategy."""
-        gmm = GatedMemoryMixture(
-            num_experts=2, memory_slots=16, hidden_dim=768, init_strategies="learned"
-        )
+        gmm = GatedMemoryMixture(num_experts=2, memory_slots=16, hidden_dim=768, init_strategies="learned")
         expert_0 = gmm.get_expert_state(0)
         assert expert_0.shape == (16, 768)
         # Learned initialization should have non-zero values
@@ -99,9 +89,7 @@ class TestInitializationStrategies:
 
     def test_zeros_initialization(self):
         """Test zeros initialization strategy."""
-        gmm = GatedMemoryMixture(
-            num_experts=2, memory_slots=16, hidden_dim=768, init_strategies="zeros"
-        )
+        gmm = GatedMemoryMixture(num_experts=2, memory_slots=16, hidden_dim=768, init_strategies="zeros")
         expert_0 = gmm.get_expert_state(0)
         assert expert_0.shape == (16, 768)
         # Zeros initialization should be all zeros
@@ -109,9 +97,7 @@ class TestInitializationStrategies:
 
     def test_uniform_initialization(self):
         """Test uniform initialization strategy."""
-        gmm = GatedMemoryMixture(
-            num_experts=2, memory_slots=16, hidden_dim=768, init_strategies="uniform"
-        )
+        gmm = GatedMemoryMixture(num_experts=2, memory_slots=16, hidden_dim=768, init_strategies="uniform")
         expert_0 = gmm.get_expert_state(0)
         assert expert_0.shape == (16, 768)
         # Uniform initialization should be in [0, 0.1]
@@ -120,9 +106,7 @@ class TestInitializationStrategies:
 
     def test_orthogonal_initialization(self):
         """Test orthogonal initialization strategy."""
-        gmm = GatedMemoryMixture(
-            num_experts=2, memory_slots=16, hidden_dim=768, init_strategies="orthogonal"
-        )
+        gmm = GatedMemoryMixture(num_experts=2, memory_slots=16, hidden_dim=768, init_strategies="orthogonal")
         expert_0 = gmm.get_expert_state(0)
         assert expert_0.shape == (16, 768)
         # Orthogonal initialization should have non-zero values
@@ -147,9 +131,7 @@ class TestInitializationStrategies:
 
     def test_different_experts_have_different_states(self):
         """Test that different experts initialize with different values."""
-        gmm = GatedMemoryMixture(
-            num_experts=4, memory_slots=16, hidden_dim=768, init_strategies="learned"
-        )
+        gmm = GatedMemoryMixture(num_experts=4, memory_slots=16, hidden_dim=768, init_strategies="learned")
 
         expert_0 = gmm.get_expert_state(0)
         expert_1 = gmm.get_expert_state(1)
@@ -167,34 +149,26 @@ class TestExpertStateManagement:
 
     def test_get_expert_state_valid_index(self):
         """Test getting expert state with valid index."""
-        gmm = GatedMemoryMixture(
-            num_experts=4, memory_slots=16, hidden_dim=768, init_strategies="learned"
-        )
+        gmm = GatedMemoryMixture(num_experts=4, memory_slots=16, hidden_dim=768, init_strategies="learned")
         for expert_idx in range(4):
             state = gmm.get_expert_state(expert_idx)
             assert state.shape == (16, 768)
 
     def test_get_expert_state_invalid_negative_index(self):
         """Test that negative expert index raises IndexError."""
-        gmm = GatedMemoryMixture(
-            num_experts=4, memory_slots=16, hidden_dim=768, init_strategies="learned"
-        )
+        gmm = GatedMemoryMixture(num_experts=4, memory_slots=16, hidden_dim=768, init_strategies="learned")
         with pytest.raises(IndexError, match="expert_idx must be in \\[0, 3\\]"):
             gmm.get_expert_state(-1)
 
     def test_get_expert_state_invalid_high_index(self):
         """Test that expert index >= num_experts raises IndexError."""
-        gmm = GatedMemoryMixture(
-            num_experts=4, memory_slots=16, hidden_dim=768, init_strategies="learned"
-        )
+        gmm = GatedMemoryMixture(num_experts=4, memory_slots=16, hidden_dim=768, init_strategies="learned")
         with pytest.raises(IndexError, match="expert_idx must be in \\[0, 3\\]"):
             gmm.get_expert_state(4)
 
     def test_set_expert_state_valid(self):
         """Test setting expert state with valid tensor."""
-        gmm = GatedMemoryMixture(
-            num_experts=4, memory_slots=16, hidden_dim=768, init_strategies="zeros"
-        )
+        gmm = GatedMemoryMixture(num_experts=4, memory_slots=16, hidden_dim=768, init_strategies="zeros")
 
         # Create new state
         new_state = torch.ones(16, 768)
@@ -210,9 +184,7 @@ class TestExpertStateManagement:
 
     def test_set_expert_state_invalid_index(self):
         """Test that invalid expert index raises IndexError."""
-        gmm = GatedMemoryMixture(
-            num_experts=4, memory_slots=16, hidden_dim=768, init_strategies="learned"
-        )
+        gmm = GatedMemoryMixture(num_experts=4, memory_slots=16, hidden_dim=768, init_strategies="learned")
         new_state = torch.ones(16, 768)
 
         with pytest.raises(IndexError, match="expert_idx must be in \\[0, 3\\]"):
@@ -220,9 +192,7 @@ class TestExpertStateManagement:
 
     def test_set_expert_state_wrong_shape(self):
         """Test that wrong shape raises ValueError."""
-        gmm = GatedMemoryMixture(
-            num_experts=4, memory_slots=16, hidden_dim=768, init_strategies="learned"
-        )
+        gmm = GatedMemoryMixture(num_experts=4, memory_slots=16, hidden_dim=768, init_strategies="learned")
         wrong_shape_state = torch.ones(16, 512)  # Wrong hidden_dim
 
         with pytest.raises(ValueError, match="Expert state must have shape"):
@@ -230,9 +200,7 @@ class TestExpertStateManagement:
 
     def test_independent_expert_updates(self):
         """Test that updating one expert doesn't affect others."""
-        gmm = GatedMemoryMixture(
-            num_experts=4, memory_slots=16, hidden_dim=768, init_strategies="zeros"
-        )
+        gmm = GatedMemoryMixture(num_experts=4, memory_slots=16, hidden_dim=768, init_strategies="zeros")
 
         # Store original states
         original_states = [gmm.get_expert_state(i).clone() for i in range(4)]
@@ -250,9 +218,7 @@ class TestExpertStateManagement:
 
     def test_get_all_experts(self):
         """Test batch access to all expert states."""
-        gmm = GatedMemoryMixture(
-            num_experts=4, memory_slots=16, hidden_dim=768, init_strategies="learned"
-        )
+        gmm = GatedMemoryMixture(num_experts=4, memory_slots=16, hidden_dim=768, init_strategies="learned")
 
         all_experts = gmm.get_all_experts()
         assert len(all_experts) == 4
@@ -270,9 +236,7 @@ class TestResetFunctionality:
 
     def test_reset_experts_learned(self):
         """Test reset with learned initialization."""
-        gmm = GatedMemoryMixture(
-            num_experts=4, memory_slots=16, hidden_dim=768, init_strategies="learned"
-        )
+        gmm = GatedMemoryMixture(num_experts=4, memory_slots=16, hidden_dim=768, init_strategies="learned")
 
         # Modify expert states
         for i in range(4):
@@ -289,9 +253,7 @@ class TestResetFunctionality:
 
     def test_reset_experts_zeros(self):
         """Test reset with zeros initialization."""
-        gmm = GatedMemoryMixture(
-            num_experts=4, memory_slots=16, hidden_dim=768, init_strategies="zeros"
-        )
+        gmm = GatedMemoryMixture(num_experts=4, memory_slots=16, hidden_dim=768, init_strategies="zeros")
 
         # Modify expert states
         for i in range(4):
@@ -341,9 +303,7 @@ class TestShapeValidation:
 
     def test_forward_no_input_returns_internal_states(self):
         """Test forward() with no input returns internal expert states."""
-        gmm = GatedMemoryMixture(
-            num_experts=4, memory_slots=16, hidden_dim=768, init_strategies="learned"
-        )
+        gmm = GatedMemoryMixture(num_experts=4, memory_slots=16, hidden_dim=768, init_strategies="learned")
 
         output = gmm.forward()
         assert len(output) == 4
@@ -352,9 +312,7 @@ class TestShapeValidation:
 
     def test_forward_valid_2d_states(self):
         """Test forward() with valid 2D expert states."""
-        gmm = GatedMemoryMixture(
-            num_experts=4, memory_slots=16, hidden_dim=768, init_strategies="learned"
-        )
+        gmm = GatedMemoryMixture(num_experts=4, memory_slots=16, hidden_dim=768, init_strategies="learned")
 
         expert_states = [torch.randn(16, 768) for _ in range(4)]
         output = gmm.forward(expert_states)
@@ -362,9 +320,7 @@ class TestShapeValidation:
 
     def test_forward_valid_3d_batched_states(self):
         """Test forward() with valid 3D batched expert states."""
-        gmm = GatedMemoryMixture(
-            num_experts=4, memory_slots=16, hidden_dim=768, init_strategies="learned"
-        )
+        gmm = GatedMemoryMixture(num_experts=4, memory_slots=16, hidden_dim=768, init_strategies="learned")
 
         # Batch size 8
         expert_states = [torch.randn(8, 16, 768) for _ in range(4)]
@@ -373,9 +329,7 @@ class TestShapeValidation:
 
     def test_forward_wrong_expert_count(self):
         """Test forward() raises ValueError for wrong expert count."""
-        gmm = GatedMemoryMixture(
-            num_experts=4, memory_slots=16, hidden_dim=768, init_strategies="learned"
-        )
+        gmm = GatedMemoryMixture(num_experts=4, memory_slots=16, hidden_dim=768, init_strategies="learned")
 
         expert_states = [torch.randn(16, 768) for _ in range(3)]  # Only 3 experts
         with pytest.raises(ValueError, match="expert_states must contain 4 experts"):
@@ -383,9 +337,7 @@ class TestShapeValidation:
 
     def test_forward_wrong_memory_slots(self):
         """Test forward() raises ValueError for wrong memory_slots."""
-        gmm = GatedMemoryMixture(
-            num_experts=4, memory_slots=16, hidden_dim=768, init_strategies="learned"
-        )
+        gmm = GatedMemoryMixture(num_experts=4, memory_slots=16, hidden_dim=768, init_strategies="learned")
 
         expert_states = [torch.randn(8, 768) for _ in range(4)]  # Wrong memory_slots
         with pytest.raises(ValueError, match="Expert 0 state has shape mismatch"):
@@ -393,9 +345,7 @@ class TestShapeValidation:
 
     def test_forward_wrong_hidden_dim(self):
         """Test forward() raises ValueError for wrong hidden_dim."""
-        gmm = GatedMemoryMixture(
-            num_experts=4, memory_slots=16, hidden_dim=768, init_strategies="learned"
-        )
+        gmm = GatedMemoryMixture(num_experts=4, memory_slots=16, hidden_dim=768, init_strategies="learned")
 
         expert_states = [torch.randn(16, 512) for _ in range(4)]  # Wrong hidden_dim
         with pytest.raises(ValueError, match="Expert 0 state has shape mismatch"):
@@ -403,9 +353,7 @@ class TestShapeValidation:
 
     def test_forward_invalid_dimensions(self):
         """Test forward() raises ValueError for invalid tensor dimensions."""
-        gmm = GatedMemoryMixture(
-            num_experts=4, memory_slots=16, hidden_dim=768, init_strategies="learned"
-        )
+        gmm = GatedMemoryMixture(num_experts=4, memory_slots=16, hidden_dim=768, init_strategies="learned")
 
         expert_states = [torch.randn(768) for _ in range(4)]  # 1D tensors
         with pytest.raises(ValueError, match="must be 2D .* or 3D"):
@@ -414,9 +362,7 @@ class TestShapeValidation:
     @pytest.mark.parametrize("batch_size", [1, 4, 8, 16])
     def test_forward_various_batch_sizes(self, batch_size):
         """Test forward() with various batch sizes."""
-        gmm = GatedMemoryMixture(
-            num_experts=4, memory_slots=16, hidden_dim=768, init_strategies="learned"
-        )
+        gmm = GatedMemoryMixture(num_experts=4, memory_slots=16, hidden_dim=768, init_strategies="learned")
 
         expert_states = [torch.randn(batch_size, 16, 768) for _ in range(4)]
         output = gmm.forward(expert_states)

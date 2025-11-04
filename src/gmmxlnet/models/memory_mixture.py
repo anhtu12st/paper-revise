@@ -131,7 +131,7 @@ class GatedMemoryMixture(nn.Module):
                 f"expert_idx must be in [0, {self.num_experts - 1}], got {expert_idx}. "
                 f"GMM has {self.num_experts} experts."
             )
-        return self._expert_params[expert_idx]
+        return torch.as_tensor(self._expert_params[expert_idx])
 
     def set_expert_state(self, expert_idx: int, state: torch.Tensor) -> None:
         """

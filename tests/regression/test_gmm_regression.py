@@ -18,8 +18,7 @@ class TestMemXLNetImportsWork:
 
     def test_memxlnet_core_imports(self):
         """Test that core MemXLNet modules can be imported."""
-        from memxlnet.models import MemXLNetForQA
-        from memxlnet.models import DifferentiableMemory, MemoryController
+        from memxlnet.models import DifferentiableMemory, MemoryController, MemXLNetForQA
         from memxlnet.training import TrainingConfig, XLNetRecurrentTrainer
 
         assert MemXLNetForQA is not None
@@ -204,6 +203,7 @@ class TestNoPerformanceRegression:
 
         start_time = time.time()
         import memxlnet  # noqa: F401
+
         import_time = time.time() - start_time
 
         # Import should take less than 1 second
@@ -211,8 +211,9 @@ class TestNoPerformanceRegression:
 
     def test_memxlnet_initialization_time(self):
         """Test that model initialization is still fast."""
-        from memxlnet.models import MemXLNetForQA
         import time
+
+        from memxlnet.models import MemXLNetForQA
 
         config = XLNetConfig(
             vocab_size=1000,
@@ -224,7 +225,7 @@ class TestNoPerformanceRegression:
         base_model = XLNetForQuestionAnsweringSimple(config)
 
         start_time = time.time()
-        model = MemXLNetForQA(
+        MemXLNetForQA(
             base_model=base_model,
             mem_token_count=8,
         )

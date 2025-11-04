@@ -67,13 +67,9 @@ class MemoryGatingNetwork(nn.Module):
                 f"Use powers of 2 (2, 4, 8) for optimal load balancing."
             )
         if pooling_method not in ["mean", "max", "attention"]:
-            raise ValueError(
-                f"pooling_method must be 'mean', 'max', or 'attention', got {pooling_method}"
-            )
+            raise ValueError(f"pooling_method must be 'mean', 'max', or 'attention', got {pooling_method}")
         if pooling_method == "attention":
-            raise NotImplementedError(
-                "Attention-weighted pooling not yet implemented. Use 'mean' or 'max'."
-            )
+            raise NotImplementedError("Attention-weighted pooling not yet implemented. Use 'mean' or 'max'.")
 
         self.hidden_dim = hidden_dim
         self.num_experts = num_experts
@@ -89,9 +85,7 @@ class MemoryGatingNetwork(nn.Module):
         self.logit_clamp_min = -10.0
         self.logit_clamp_max = 10.0
 
-    def forward(
-        self, memory_write_hiddens: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def forward(self, memory_write_hiddens: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Compute routing probabilities over memory experts.
 
@@ -116,8 +110,7 @@ class MemoryGatingNetwork(nn.Module):
         # Validate input shape
         if hidden_dim != self.hidden_dim:
             raise ValueError(
-                f"Expected hidden_dim={self.hidden_dim}, got {hidden_dim}. "
-                f"Routing network configuration mismatch."
+                f"Expected hidden_dim={self.hidden_dim}, got {hidden_dim}. Routing network configuration mismatch."
             )
 
         # Step 1: Pool memory write tokens (batch, memory_slots, hidden_dim) → (batch, hidden_dim)
@@ -131,9 +124,7 @@ class MemoryGatingNetwork(nn.Module):
         routing_logits = self.routing_projection(pooled_hiddens)
 
         # Step 4: Clamp logits for numerical stability (prevent NaN/Inf in softmax)
-        routing_logits = torch.clamp(
-            routing_logits, min=self.logit_clamp_min, max=self.logit_clamp_max
-        )
+        routing_logits = torch.clamp(routing_logits, min=self.logit_clamp_min, max=self.logit_clamp_max)
 
         # Step 5: Temperature-scaled softmax
         routing_probs = F.softmax(routing_logits / self.temperature, dim=-1)

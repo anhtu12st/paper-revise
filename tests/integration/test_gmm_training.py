@@ -9,9 +9,6 @@ Tests full training loop with toy dataset to verify:
 - Checkpoint save/load functionality
 """
 
-import tempfile
-from pathlib import Path
-
 import pytest
 import torch
 from torch.utils.data import DataLoader, Dataset
@@ -65,7 +62,6 @@ def collate_fn(batch):
     """Collate function for toy dataset."""
     # Process each example separately to avoid batch size mismatch
     # For simplicity, just return first segment from each example
-    batch_size = len(batch)
     input_ids = torch.stack([item["input_ids"][0] for item in batch], dim=0)  # First segment only
     attention_mask = torch.stack([item["attention_mask"][0] for item in batch], dim=0)
     start_positions = torch.cat([item["start_positions"] for item in batch], dim=0)
@@ -241,11 +237,7 @@ class TestGMMTrainingLoop:
 
         # Create dummy input
         batch_size = 2
-        seq_len = 32
         hidden_dim = 64
-
-        input_ids = torch.randint(0, 1000, (batch_size, seq_len))
-        attention_mask = torch.ones(batch_size, seq_len)
 
         # Get hidden states (mock)
         write_hiddens = torch.randn(batch_size, 8, hidden_dim)
@@ -295,9 +287,7 @@ class TestGMMTrainingLoop:
 
         for key in original_state:
             assert key in loaded_state, f"Key {key} missing from loaded state"
-            assert torch.allclose(
-                original_state[key], loaded_state[key], atol=1e-5
-            ), f"State mismatch for key {key}"
+            assert torch.allclose(original_state[key], loaded_state[key], atol=1e-5), f"State mismatch for key {key}"
 
     def test_training_with_different_expert_counts(self, toy_base_model, toy_dataset):
         """Test training works with different expert counts (k=2, 4, 8)."""
@@ -424,7 +414,9 @@ class TestGMMTrainingLoop:
         gmm_params_checked = 0
         for name, param in model.named_parameters():
             # Only check GMM-specific parameters
-            if any(gmm_comp in name for gmm_comp in ["memory_mixture", "gating_network", "expert_updater", "memory_reader"]):
+            if any(
+                gmm_comp in name for gmm_comp in ["memory_mixture", "gating_network", "expert_updater", "memory_reader"]
+            ):
                 if param.requires_grad and param.grad is not None:
                     assert not torch.isnan(param.grad).any(), f"Parameter {name} has NaN gradients"
                     gmm_params_checked += 1

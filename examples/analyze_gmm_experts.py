@@ -18,7 +18,6 @@ Usage:
 """
 
 import argparse
-import json
 import sys
 from pathlib import Path
 
@@ -35,9 +34,7 @@ from memxlnet.data import ChunkedSquadDataset
 
 def parse_args():
     """Parse command-line arguments."""
-    parser = argparse.ArgumentParser(
-        description="Analyze GMM expert specialization and routing behavior"
-    )
+    parser = argparse.ArgumentParser(description="Analyze GMM expert specialization and routing behavior")
     parser.add_argument(
         "--model-path",
         type=str,
@@ -200,7 +197,7 @@ def main():
 
     # Generate comprehensive analysis report
     report_path = output_dir / "analysis_report.json"
-    print(f"\nGenerating comprehensive analysis report...")
+    print("\nGenerating comprehensive analysis report...")
     report = analyzer.generate_analysis_report(
         output_path=str(report_path),
         include_model_id=args.model_id or args.model_path,
@@ -216,10 +213,10 @@ def main():
     print(f"Model: {report['model_id']}")
     print(f"Dataset: {report['evaluation_dataset']}")
     print(f"Experts: {report['num_experts']}")
-    print(f"\nMetrics:")
+    print("\nMetrics:")
     for metric_name, metric_value in report["metrics"].items():
         print(f"  {metric_name}: {metric_value:.4f}")
-    print(f"\nExpert Activations:")
+    print("\nExpert Activations:")
     for expert_id, activation in report["expert_activations"].items():
         print(f"  {expert_id}: {activation:.4f}")
     print(f"\nAll results saved to: {output_dir}")

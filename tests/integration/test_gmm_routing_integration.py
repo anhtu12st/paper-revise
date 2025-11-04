@@ -168,9 +168,7 @@ class TestParameterCount:
         # Test different expert counts
         param_counts = {}
         for num_experts in [2, 4, 8]:
-            router = MemoryGatingNetwork(
-                hidden_dim=hidden_dim, num_experts=num_experts, temperature=1.0
-            )
+            router = MemoryGatingNetwork(hidden_dim=hidden_dim, num_experts=num_experts, temperature=1.0)
             param_counts[num_experts] = sum(p.numel() for p in router.parameters())
 
         # Verify linear scaling
@@ -261,7 +259,7 @@ class TestMemoryEfficiency:
         # Should be < 100KB for parameters
         assert memory_bytes < 100_000
 
-        print(f"Router memory footprint: {memory_bytes:,} bytes ({memory_bytes/1024:.2f} KB)")
+        print(f"Router memory footprint: {memory_bytes:,} bytes ({memory_bytes / 1024:.2f} KB)")
 
     def test_router_forward_pass_efficient(self):
         """Test that router forward pass is efficient (no memory leaks)."""
@@ -284,9 +282,7 @@ class TestRouterConfiguration:
     def test_different_hidden_dims(self):
         """Test router with different hidden dimensions."""
         for hidden_dim in [512, 768, 1024]:
-            router = MemoryGatingNetwork(
-                hidden_dim=hidden_dim, num_experts=4, temperature=1.0
-            )
+            router = MemoryGatingNetwork(hidden_dim=hidden_dim, num_experts=4, temperature=1.0)
             hiddens = torch.randn(8, 16, hidden_dim)
             probs, _, _ = router(hiddens)
 
@@ -296,9 +292,7 @@ class TestRouterConfiguration:
     def test_different_temperatures(self):
         """Test router with different temperature settings."""
         for temperature in [0.1, 0.5, 1.0, 2.0, 5.0]:
-            router = MemoryGatingNetwork(
-                hidden_dim=768, num_experts=4, temperature=temperature
-            )
+            router = MemoryGatingNetwork(hidden_dim=768, num_experts=4, temperature=temperature)
             hiddens = torch.randn(8, 16, 768)
             probs, _, _ = router(hiddens)
 
@@ -308,9 +302,7 @@ class TestRouterConfiguration:
     def test_different_num_experts(self):
         """Test router with different expert counts."""
         for num_experts in [2, 4, 8]:
-            router = MemoryGatingNetwork(
-                hidden_dim=768, num_experts=num_experts, temperature=1.0
-            )
+            router = MemoryGatingNetwork(hidden_dim=768, num_experts=num_experts, temperature=1.0)
             hiddens = torch.randn(8, 16, 768)
             probs, _, _ = router(hiddens)
 

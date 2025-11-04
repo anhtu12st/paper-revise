@@ -16,9 +16,7 @@ class TestAggregatedMemoryReaderInitialization:
 
     def test_valid_initialization_write_based(self):
         """Test successful initialization with write-based routing."""
-        reader = AggregatedMemoryReader(
-            hidden_dim=768, num_experts=4, routing_mode="write-based"
-        )
+        reader = AggregatedMemoryReader(hidden_dim=768, num_experts=4, routing_mode="write-based")
         assert reader.hidden_dim == 768
         assert reader.num_experts == 4
         assert reader.routing_mode == "write-based"
@@ -26,9 +24,7 @@ class TestAggregatedMemoryReaderInitialization:
 
     def test_valid_initialization_read_based(self):
         """Test successful initialization with read-based routing."""
-        reader = AggregatedMemoryReader(
-            hidden_dim=768, num_experts=4, routing_mode="read-based", temperature=1.5
-        )
+        reader = AggregatedMemoryReader(hidden_dim=768, num_experts=4, routing_mode="read-based", temperature=1.5)
         assert reader.hidden_dim == 768
         assert reader.num_experts == 4
         assert reader.routing_mode == "read-based"
@@ -53,22 +49,16 @@ class TestAggregatedMemoryReaderInitialization:
     def test_routing_mode_validation_invalid(self):
         """Test that invalid routing_mode raises ValueError."""
         with pytest.raises(ValueError, match="routing_mode must be"):
-            AggregatedMemoryReader(
-                hidden_dim=768, num_experts=4, routing_mode="invalid-mode"
-            )
+            AggregatedMemoryReader(hidden_dim=768, num_experts=4, routing_mode="invalid-mode")
 
     def test_read_gating_network_not_created_for_write_based(self):
         """Test that read gating network is not created for write-based mode."""
-        reader = AggregatedMemoryReader(
-            hidden_dim=768, num_experts=4, routing_mode="write-based"
-        )
+        reader = AggregatedMemoryReader(hidden_dim=768, num_experts=4, routing_mode="write-based")
         assert reader.read_gating_network is None
 
     def test_read_gating_network_created_for_read_based(self):
         """Test that read gating network is created for read-based mode."""
-        reader = AggregatedMemoryReader(
-            hidden_dim=768, num_experts=4, routing_mode="read-based"
-        )
+        reader = AggregatedMemoryReader(hidden_dim=768, num_experts=4, routing_mode="read-based")
         assert reader.read_gating_network is not None
         assert reader.read_gating_network.hidden_dim == 768
         assert reader.read_gating_network.num_experts == 4
@@ -80,9 +70,7 @@ class TestWriteBasedRouting:
     @pytest.fixture
     def reader(self):
         """Write-based reader fixture."""
-        return AggregatedMemoryReader(
-            hidden_dim=768, num_experts=4, routing_mode="write-based"
-        )
+        return AggregatedMemoryReader(hidden_dim=768, num_experts=4, routing_mode="write-based")
 
     @pytest.fixture
     def expert_states(self):
@@ -90,9 +78,7 @@ class TestWriteBasedRouting:
         batch_size = 8
         memory_slots = 16
         hidden_dim = 768
-        return [
-            torch.randn(batch_size, memory_slots, hidden_dim) for _ in range(4)
-        ]
+        return [torch.randn(batch_size, memory_slots, hidden_dim) for _ in range(4)]
 
     @pytest.fixture
     def routing_probs(self):
@@ -112,9 +98,7 @@ class TestWriteBasedRouting:
     def test_forward_with_various_batch_sizes(self, reader):
         """Test forward pass with different batch sizes."""
         for batch_size in [1, 4, 16, 32]:
-            expert_states = [
-                torch.randn(batch_size, 16, 768) for _ in range(4)
-            ]
+            expert_states = [torch.randn(batch_size, 16, 768) for _ in range(4)]
             routing_probs = torch.softmax(torch.randn(batch_size, 4), dim=-1)
             aggregated = reader(expert_states, routing_probs=routing_probs)
             assert aggregated.shape == (batch_size, 16, 768)
@@ -122,9 +106,7 @@ class TestWriteBasedRouting:
     def test_forward_with_various_memory_slots(self, reader):
         """Test forward pass with different memory slot counts."""
         for memory_slots in [4, 8, 16, 32]:
-            expert_states = [
-                torch.randn(8, memory_slots, 768) for _ in range(4)
-            ]
+            expert_states = [torch.randn(8, memory_slots, 768) for _ in range(4)]
             routing_probs = torch.softmax(torch.randn(8, 4), dim=-1)
             aggregated = reader(expert_states, routing_probs=routing_probs)
             assert aggregated.shape == (8, memory_slots, 768)
@@ -150,9 +132,7 @@ class TestReadBasedRouting:
     @pytest.fixture
     def reader(self):
         """Read-based reader fixture."""
-        return AggregatedMemoryReader(
-            hidden_dim=768, num_experts=4, routing_mode="read-based", temperature=1.0
-        )
+        return AggregatedMemoryReader(hidden_dim=768, num_experts=4, routing_mode="read-based", temperature=1.0)
 
     @pytest.fixture
     def expert_states(self):
@@ -184,9 +164,7 @@ class TestReadBasedRouting:
 
     def test_compute_read_routing_fails_in_write_based_mode(self):
         """Test that compute_read_routing raises error in write-based mode."""
-        reader = AggregatedMemoryReader(
-            hidden_dim=768, num_experts=4, routing_mode="write-based"
-        )
+        reader = AggregatedMemoryReader(hidden_dim=768, num_experts=4, routing_mode="write-based")
         read_hiddens = torch.randn(8, 16, 768)
         with pytest.raises(RuntimeError, match="only available in read-based mode"):
             reader.compute_read_routing(read_hiddens)
@@ -194,9 +172,7 @@ class TestReadBasedRouting:
     def test_forward_with_various_batch_sizes(self, reader):
         """Test forward pass with different batch sizes."""
         for batch_size in [1, 4, 16, 32]:
-            expert_states = [
-                torch.randn(batch_size, 16, 768) for _ in range(4)
-            ]
+            expert_states = [torch.randn(batch_size, 16, 768) for _ in range(4)]
             read_hiddens = torch.randn(batch_size, 16, 768)
             aggregated = reader(expert_states, read_hiddens=read_hiddens)
             assert aggregated.shape == (batch_size, 16, 768)
@@ -222,9 +198,7 @@ class TestWeightedAggregation:
     @pytest.fixture
     def reader(self):
         """Standard reader fixture."""
-        return AggregatedMemoryReader(
-            hidden_dim=768, num_experts=4, routing_mode="write-based"
-        )
+        return AggregatedMemoryReader(hidden_dim=768, num_experts=4, routing_mode="write-based")
 
     def test_aggregation_correctness_manual_calculation(self, reader):
         """Test aggregation matches manual calculation."""
@@ -234,8 +208,7 @@ class TestWeightedAggregation:
 
         # Create simple expert states for manual verification
         expert_states = [
-            torch.ones(batch_size, memory_slots, hidden_dim) * (i + 1)
-            for i in range(4)
+            torch.ones(batch_size, memory_slots, hidden_dim) * (i + 1) for i in range(4)
         ]  # Expert 0: all 1s, Expert 1: all 2s, etc.
 
         # Create simple routing probs
@@ -272,10 +245,7 @@ class TestWeightedAggregation:
         hidden_dim = 768
 
         # Create distinct expert states
-        expert_states = [
-            torch.ones(batch_size, memory_slots, hidden_dim) * (i + 1)
-            for i in range(4)
-        ]
+        expert_states = [torch.ones(batch_size, memory_slots, hidden_dim) * (i + 1) for i in range(4)]
 
         # Uniform routing (all experts weighted equally)
         routing_probs = torch.ones(batch_size, 4) / 4
@@ -289,9 +259,7 @@ class TestWeightedAggregation:
     def test_aggregation_with_various_expert_counts(self):
         """Test aggregation with k=2, 4, 8 experts."""
         for num_experts in [2, 4, 8]:
-            reader = AggregatedMemoryReader(
-                hidden_dim=768, num_experts=num_experts, routing_mode="write-based"
-            )
+            reader = AggregatedMemoryReader(hidden_dim=768, num_experts=num_experts, routing_mode="write-based")
             expert_states = [torch.randn(8, 16, 768) for _ in range(num_experts)]
             routing_probs = torch.softmax(torch.randn(8, num_experts), dim=-1)
 
@@ -300,9 +268,7 @@ class TestWeightedAggregation:
 
     def test_aggregation_preserves_gradient_flow(self, reader):
         """Test that aggregation preserves gradient flow."""
-        expert_states = [
-            torch.randn(8, 16, 768, requires_grad=True) for _ in range(4)
-        ]
+        expert_states = [torch.randn(8, 16, 768, requires_grad=True) for _ in range(4)]
         routing_probs = torch.softmax(torch.randn(8, 4), dim=-1)
 
         aggregated = reader(expert_states, routing_probs=routing_probs)
@@ -323,9 +289,7 @@ class TestEmbeddingReplacement:
     @pytest.fixture
     def reader(self):
         """Standard reader fixture."""
-        return AggregatedMemoryReader(
-            hidden_dim=768, num_experts=4, routing_mode="write-based"
-        )
+        return AggregatedMemoryReader(hidden_dim=768, num_experts=4, routing_mode="write-based")
 
     def test_replace_embeddings_single_position(self, reader):
         """Test replacement with single read position per batch item."""
@@ -337,9 +301,7 @@ class TestEmbeddingReplacement:
         aggregated_memory = torch.randn(batch_size, 1, hidden_dim)  # 1 read token
         read_positions = torch.randint(0, sequence_length, (batch_size,))
 
-        modified_output = reader.replace_read_embeddings(
-            sequence_output, aggregated_memory, read_positions
-        )
+        modified_output = reader.replace_read_embeddings(sequence_output, aggregated_memory, read_positions)
 
         # Check shape preserved
         assert modified_output.shape == sequence_output.shape
@@ -362,13 +324,9 @@ class TestEmbeddingReplacement:
 
         sequence_output = torch.randn(batch_size, sequence_length, hidden_dim)
         aggregated_memory = torch.randn(batch_size, num_read_tokens, hidden_dim)
-        read_positions = torch.randint(
-            0, sequence_length, (batch_size, num_read_tokens)
-        )
+        read_positions = torch.randint(0, sequence_length, (batch_size, num_read_tokens))
 
-        modified_output = reader.replace_read_embeddings(
-            sequence_output, aggregated_memory, read_positions
-        )
+        modified_output = reader.replace_read_embeddings(sequence_output, aggregated_memory, read_positions)
 
         # Check shape preserved
         assert modified_output.shape == sequence_output.shape
@@ -393,16 +351,12 @@ class TestEmbeddingReplacement:
         aggregated_memory = torch.randn(batch_size, 1, hidden_dim)
         read_positions = torch.tensor([10] * batch_size)  # All at position 10
 
-        modified_output = reader.replace_read_embeddings(
-            sequence_output, aggregated_memory, read_positions
-        )
+        modified_output = reader.replace_read_embeddings(sequence_output, aggregated_memory, read_positions)
 
         # Check non-read positions unchanged
         for pos in range(sequence_length):
             if pos != 10:
-                assert torch.allclose(
-                    modified_output[:, pos, :], sequence_output[:, pos, :], atol=1e-6
-                )
+                assert torch.allclose(modified_output[:, pos, :], sequence_output[:, pos, :], atol=1e-6)
 
     def test_replace_embeddings_batch_size_mismatch(self, reader):
         """Test that batch size mismatch raises ValueError."""
@@ -411,9 +365,7 @@ class TestEmbeddingReplacement:
         read_positions = torch.tensor([10] * 8)
 
         with pytest.raises(ValueError, match="Batch size mismatch"):
-            reader.replace_read_embeddings(
-                sequence_output, aggregated_memory, read_positions
-            )
+            reader.replace_read_embeddings(sequence_output, aggregated_memory, read_positions)
 
     def test_replace_embeddings_hidden_dim_mismatch(self, reader):
         """Test that hidden_dim mismatch raises ValueError."""
@@ -422,9 +374,7 @@ class TestEmbeddingReplacement:
         read_positions = torch.tensor([10] * 8)
 
         with pytest.raises(ValueError, match="Hidden dimension mismatch"):
-            reader.replace_read_embeddings(
-                sequence_output, aggregated_memory, read_positions
-            )
+            reader.replace_read_embeddings(sequence_output, aggregated_memory, read_positions)
 
     def test_replace_embeddings_memory_slots_mismatch(self, reader):
         """Test that memory_slots and num_read_tokens mismatch raises ValueError."""
@@ -433,9 +383,7 @@ class TestEmbeddingReplacement:
         read_positions = torch.randint(0, 128, (8, 2))  # Only 2 read positions
 
         with pytest.raises(ValueError, match="Number of memory slots"):
-            reader.replace_read_embeddings(
-                sequence_output, aggregated_memory, read_positions
-            )
+            reader.replace_read_embeddings(sequence_output, aggregated_memory, read_positions)
 
     def test_replace_embeddings_position_out_of_bounds(self, reader):
         """Test that out-of-bounds positions raise ValueError."""
@@ -444,9 +392,7 @@ class TestEmbeddingReplacement:
         read_positions = torch.tensor([150] * 8)  # Out of bounds
 
         with pytest.raises(ValueError, match="read_positions must be in"):
-            reader.replace_read_embeddings(
-                sequence_output, aggregated_memory, read_positions
-            )
+            reader.replace_read_embeddings(sequence_output, aggregated_memory, read_positions)
 
 
 class TestInputValidation:
@@ -455,9 +401,7 @@ class TestInputValidation:
     @pytest.fixture
     def reader(self):
         """Standard reader fixture."""
-        return AggregatedMemoryReader(
-            hidden_dim=768, num_experts=4, routing_mode="write-based"
-        )
+        return AggregatedMemoryReader(hidden_dim=768, num_experts=4, routing_mode="write-based")
 
     def test_expert_states_not_list(self, reader):
         """Test that non-list expert_states raises ValueError."""
@@ -503,9 +447,7 @@ class TestEfficiency:
     @pytest.fixture
     def reader(self):
         """Standard reader fixture."""
-        return AggregatedMemoryReader(
-            hidden_dim=768, num_experts=4, routing_mode="write-based"
-        )
+        return AggregatedMemoryReader(hidden_dim=768, num_experts=4, routing_mode="write-based")
 
     def test_batched_aggregation_efficiency(self, reader):
         """Test that aggregation uses batched operations (no Python loops)."""
@@ -551,9 +493,7 @@ class TestEdgeCases:
 
     def test_single_batch_item(self):
         """Test aggregation with batch_size=1."""
-        reader = AggregatedMemoryReader(
-            hidden_dim=768, num_experts=4, routing_mode="write-based"
-        )
+        reader = AggregatedMemoryReader(hidden_dim=768, num_experts=4, routing_mode="write-based")
         expert_states = [torch.randn(1, 16, 768) for _ in range(4)]
         routing_probs = torch.softmax(torch.randn(1, 4), dim=-1)
 
@@ -562,9 +502,7 @@ class TestEdgeCases:
 
     def test_zero_routing_to_all_experts(self):
         """Test aggregation when all routing probabilities are effectively zero."""
-        reader = AggregatedMemoryReader(
-            hidden_dim=768, num_experts=4, routing_mode="write-based"
-        )
+        reader = AggregatedMemoryReader(hidden_dim=768, num_experts=4, routing_mode="write-based")
         expert_states = [torch.ones(8, 16, 768) * (i + 1) for i in range(4)]
 
         # Very small but non-zero probabilities that sum to 1
@@ -578,20 +516,14 @@ class TestEdgeCases:
 
     def test_replace_embeddings_edge_positions(self):
         """Test replacement at first and last positions in sequence."""
-        reader = AggregatedMemoryReader(
-            hidden_dim=768, num_experts=4, routing_mode="write-based"
-        )
+        reader = AggregatedMemoryReader(hidden_dim=768, num_experts=4, routing_mode="write-based")
         sequence_output = torch.randn(8, 128, 768)
         aggregated_memory = torch.randn(8, 2, 768)
 
         # Test first and last positions
-        read_positions = torch.tensor(
-            [[0, 127]] * 8
-        )  # First and last for all batch items
+        read_positions = torch.tensor([[0, 127]] * 8)  # First and last for all batch items
 
-        modified_output = reader.replace_read_embeddings(
-            sequence_output, aggregated_memory, read_positions
-        )
+        modified_output = reader.replace_read_embeddings(sequence_output, aggregated_memory, read_positions)
         assert modified_output.shape == sequence_output.shape
 
         # Verify replacements at edges

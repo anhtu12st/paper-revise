@@ -163,9 +163,7 @@ class TestGMMTrainingConfigSerialization:
 
     def test_to_dict_from_dict_round_trip(self):
         """Test serialization round-trip preserves configuration."""
-        original = gmm_balanced_config(
-            routing_temperature=2.0, entropy_regularization_weight=0.1, num_epochs=5
-        )
+        original = gmm_balanced_config(routing_temperature=2.0, entropy_regularization_weight=0.1, num_epochs=5)
         config_dict = original.to_dict()
         restored = GMMTrainingConfig.from_dict(config_dict)
 

@@ -25,7 +25,6 @@ Usage:
 """
 
 import argparse
-import os
 from pathlib import Path
 
 import torch
@@ -35,7 +34,6 @@ from transformers import XLNetTokenizerFast
 from gmmxlnet.models import GMMXLNetForQA
 from gmmxlnet.utils import GMMAnalyzer
 from memxlnet.data import ChunkedSquadDataset
-from memxlnet.evaluation import QAEvaluator
 
 
 def parse_args():
@@ -126,7 +124,7 @@ def load_model(args):
         print(f"  Loading from local path: {args.model_path}")
         model = GMMXLNetForQA.from_pretrained(args.model_path)
 
-    print(f"✓ Model loaded")
+    print("✓ Model loaded")
     print(f"  - Number of experts: {model.num_experts}")
     print(f"  - Memory slots per expert: {model.memory_slots}")
     print(f"  - Routing mode: {model.routing_mode}")
@@ -149,7 +147,7 @@ def load_dataset(args, tokenizer):
         dataset_name=args.dataset,
     )
 
-    print(f"✓ Dataset loaded")
+    print("✓ Dataset loaded")
     print(f"  - Dataset: {args.dataset}")
     print(f"  - Split: {args.split}")
     print(f"  - Total examples: {len(dataset)}")
@@ -199,9 +197,7 @@ def evaluate_model(model, dataset, args):
 
             # Initialize memory for batch
             if batch_idx == 0 or "memory_state" not in locals():
-                memory_state = model.get_initial_memory(
-                    batch_size=input_ids.size(0), device=device
-                )
+                memory_state = model.get_initial_memory(batch_size=input_ids.size(0), device=device)
 
             # Forward pass
             outputs = model(
@@ -231,7 +227,7 @@ def evaluate_model(model, dataset, args):
     # Compute average loss
     avg_loss = total_loss / num_batches if num_batches > 0 else 0.0
 
-    print(f"\n✓ Evaluation completed")
+    print("\n✓ Evaluation completed")
     print(f"  - Average loss: {avg_loss:.4f}")
 
     # Compute routing statistics
@@ -247,7 +243,7 @@ def evaluate_model(model, dataset, args):
             "num_segments": all_routing_probs.size(0),
         }
 
-        print(f"\n  Routing Statistics:")
+        print("\n  Routing Statistics:")
         print(f"    Expert Utilization: {[f'{u:.2%}' for u in expert_util]}")
         print(f"    Mean Entropy: {entropy:.3f}")
 
@@ -276,13 +272,13 @@ def analyze_routing(model, dataset, args):
         max_segments=200,  # Analyze first 200 segments
     )
 
-    print(f"✓ Routing analysis completed")
-    print(f"\n  Detailed Statistics:")
-    print(f"    Expert Utilization:")
+    print("✓ Routing analysis completed")
+    print("\n  Detailed Statistics:")
+    print("    Expert Utilization:")
     for i, util in enumerate(routing_stats["expert_utilization"]):
         print(f"      Expert {i}: {util:.2%}")
 
-    print(f"\n    Routing Entropy:")
+    print("\n    Routing Entropy:")
     print(f"      Mean: {routing_stats['mean_entropy']:.3f}")
     print(f"      Std:  {routing_stats['std_entropy']:.3f}")
 
@@ -291,7 +287,7 @@ def analyze_routing(model, dataset, args):
     consistency = analyzer.compute_routing_consistency()
     load_balance = analyzer.compute_load_balance_loss()
 
-    print(f"\n    Expert Diversity:")
+    print("\n    Expert Diversity:")
     print(f"      Avg off-diagonal similarity: {diversity[~torch.eye(len(diversity), dtype=bool)].mean():.3f}")
 
     print(f"\n    Routing Consistency: {consistency:.3f}")

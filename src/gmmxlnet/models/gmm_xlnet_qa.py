@@ -67,7 +67,8 @@ class GMMXLNetForQA(nn.Module):
         routing_mode: RoutingMode = "write-based",
         routing_temperature: float = 1.0,
         pooling_method: Literal["mean", "max", "attention"] = "mean",
-        init_strategies: str | list[str] = "orthogonal",
+        init_strategies: Literal["learned", "zeros", "uniform", "orthogonal"]
+        | list[Literal["learned", "zeros", "uniform", "orthogonal"]] = "orthogonal",
         use_gmm_memory: bool = True,
         mem_token_count: int = 16,
     ):
@@ -253,7 +254,7 @@ class GMMXLNetForQA(nn.Module):
                     batch_positions.append(positions[1][batch_mask][0])
                 else:
                     # Fallback to last position if not found
-                    batch_positions.append(seq_len - 1)
+                    batch_positions.append(torch.tensor(seq_len - 1, device=input_ids.device))
 
             read_positions.append(torch.tensor(batch_positions, device=input_ids.device))
 
@@ -357,9 +358,7 @@ class GMMXLNetForQA(nn.Module):
                 # Step 5: Compute aggregated memory via memory reader
                 # For read-based routing, extract read token hiddens
                 if self.routing_mode == "read-based":
-                    read_hiddens = self._extract_memory_write_hiddens(
-                        input_ids, hidden_states, mem_read_ids
-                    )
+                    read_hiddens = self._extract_memory_write_hiddens(input_ids, hidden_states, mem_read_ids)
                     aggregated_memory = self.memory_reader(
                         expert_states=updated_expert_states,
                         read_hiddens=read_hiddens,
@@ -485,9 +484,7 @@ class GMMXLNetForQA(nn.Module):
             weight_shape = gating_params["routing_projection.weight"].shape
             expected_shape = (self.num_experts, self.hidden_dim)
             if weight_shape != expected_shape:
-                raise ValueError(
-                    f"Routing network shape mismatch: expected {expected_shape}, got {weight_shape}"
-                )
+                raise ValueError(f"Routing network shape mismatch: expected {expected_shape}, got {weight_shape}")
 
         # Verify expert states have correct shapes
         for expert_idx in range(self.num_experts):
@@ -506,8 +503,7 @@ class GMMXLNetForQA(nn.Module):
             # Verify memory state structure
             if len(dummy_memory) != self.num_experts:
                 raise ValueError(
-                    f"Memory initialization failed: expected {self.num_experts} expert states, "
-                    f"got {len(dummy_memory)}"
+                    f"Memory initialization failed: expected {self.num_experts} expert states, got {len(dummy_memory)}"
                 )
         except StopIteration:
             # No parameters (likely in a test with mocked base model), skip validation
@@ -530,8 +526,9 @@ class GMMXLNetForQA(nn.Module):
         os.makedirs(save_directory, exist_ok=True)
 
         # Save base model
-        if hasattr(self.base, "save_pretrained"):
-            self.base.save_pretrained(save_directory)
+        save_pretrained = getattr(self.base, "save_pretrained", None)
+        if save_pretrained is not None and callable(save_pretrained) and not isinstance(self.base, torch.Tensor):
+            save_pretrained(save_directory)
 
         # Save GMM configuration with version info
         config = {
@@ -627,13 +624,9 @@ class GMMXLNetForQA(nn.Module):
             if "revision" in hf_hub_kwargs or not os.path.exists(load_directory):
                 from huggingface_hub import hf_hub_download
 
-                config_path = hf_hub_download(
-                    repo_id=load_directory, filename="gmm_config.json", **hf_hub_kwargs
-                )
+                config_path = hf_hub_download(repo_id=load_directory, filename="gmm_config.json", **hf_hub_kwargs)
                 try:
-                    state_path = hf_hub_download(
-                        repo_id=load_directory, filename="gmm_state.pt", **hf_hub_kwargs
-                    )
+                    state_path = hf_hub_download(repo_id=load_directory, filename="gmm_state.pt", **hf_hub_kwargs)
                 except Exception:
                     state_path = None
             else:

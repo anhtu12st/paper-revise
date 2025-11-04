@@ -16,9 +16,7 @@ class TestMemoryGatingNetworkInitialization:
 
     def test_valid_initialization(self):
         """Test successful initialization with valid parameters."""
-        router = MemoryGatingNetwork(
-            hidden_dim=768, num_experts=4, temperature=1.0, pooling_method="mean"
-        )
+        router = MemoryGatingNetwork(hidden_dim=768, num_experts=4, temperature=1.0, pooling_method="mean")
         assert router.hidden_dim == 768
         assert router.num_experts == 4
         assert router.temperature == 1.0
@@ -47,32 +45,24 @@ class TestMemoryGatingNetworkInitialization:
     def test_valid_num_experts_range(self):
         """Test that num_experts in [2, 8] are all valid."""
         for num_experts in [2, 4, 8]:
-            router = MemoryGatingNetwork(
-                hidden_dim=768, num_experts=num_experts, temperature=1.0
-            )
+            router = MemoryGatingNetwork(hidden_dim=768, num_experts=num_experts, temperature=1.0)
             assert router.num_experts == num_experts
 
     def test_pooling_method_validation_invalid(self):
         """Test that invalid pooling method raises ValueError."""
         with pytest.raises(ValueError, match="pooling_method must be"):
-            MemoryGatingNetwork(
-                hidden_dim=768, num_experts=4, temperature=1.0, pooling_method="invalid"
-            )
+            MemoryGatingNetwork(hidden_dim=768, num_experts=4, temperature=1.0, pooling_method="invalid")
 
     def test_pooling_method_attention_not_implemented(self):
         """Test that attention pooling raises NotImplementedError."""
         with pytest.raises(NotImplementedError, match="Attention-weighted pooling"):
-            MemoryGatingNetwork(
-                hidden_dim=768, num_experts=4, temperature=1.0, pooling_method="attention"
-            )
+            MemoryGatingNetwork(hidden_dim=768, num_experts=4, temperature=1.0, pooling_method="attention")
 
     def test_routing_projection_shape(self):
         """Test that routing projection has correct shape."""
         hidden_dim = 768
         num_experts = 4
-        router = MemoryGatingNetwork(
-            hidden_dim=hidden_dim, num_experts=num_experts, temperature=1.0
-        )
+        router = MemoryGatingNetwork(hidden_dim=hidden_dim, num_experts=num_experts, temperature=1.0)
         # Linear layer should map hidden_dim → num_experts
         assert router.routing_projection.weight.shape == (num_experts, hidden_dim)
         assert router.routing_projection.bias.shape == (num_experts,)
@@ -159,9 +149,7 @@ class TestTemperatureScaling:
     def test_high_temperature_uniform_distribution(self):
         """Test that high temperature produces more uniform routing."""
         # High temperature should soften the distribution
-        router_high_temp = MemoryGatingNetwork(
-            hidden_dim=768, num_experts=4, temperature=10.0
-        )
+        router_high_temp = MemoryGatingNetwork(hidden_dim=768, num_experts=4, temperature=10.0)
 
         hiddens = torch.randn(32, 16, 768)
         routing_probs, _, entropy = router_high_temp(hiddens)
@@ -179,17 +167,13 @@ class TestTemperatureScaling:
         hiddens = torch.randn(32, 16, 768)
 
         # High temperature (softer)
-        router_high_temp = MemoryGatingNetwork(
-            hidden_dim=768, num_experts=4, temperature=5.0
-        )
+        router_high_temp = MemoryGatingNetwork(hidden_dim=768, num_experts=4, temperature=5.0)
         torch.manual_seed(42)
         router_high_temp.routing_projection.weight.data = torch.randn(4, 768) * 0.1
         _, _, entropy_high = router_high_temp(hiddens)
 
         # Low temperature (sharper)
-        router_low_temp = MemoryGatingNetwork(
-            hidden_dim=768, num_experts=4, temperature=0.1
-        )
+        router_low_temp = MemoryGatingNetwork(hidden_dim=768, num_experts=4, temperature=0.1)
         torch.manual_seed(42)
         router_low_temp.routing_projection.weight.data = torch.randn(4, 768) * 0.1
         _, _, entropy_low = router_low_temp(hiddens)
@@ -203,15 +187,11 @@ class TestTemperatureScaling:
 
         # Use same random seed for fair comparison
         torch.manual_seed(42)
-        router_temp_1 = MemoryGatingNetwork(
-            hidden_dim=768, num_experts=4, temperature=1.0
-        )
+        router_temp_1 = MemoryGatingNetwork(hidden_dim=768, num_experts=4, temperature=1.0)
         _, _, entropy_1 = router_temp_1(hiddens)
 
         torch.manual_seed(42)
-        router_temp_01 = MemoryGatingNetwork(
-            hidden_dim=768, num_experts=4, temperature=0.1
-        )
+        router_temp_01 = MemoryGatingNetwork(hidden_dim=768, num_experts=4, temperature=0.1)
         _, _, entropy_01 = router_temp_01(hiddens)
 
         # Lower temperature should produce lower entropy
@@ -485,9 +465,7 @@ class TestPoolingMethods:
 
     def test_mean_pooling(self):
         """Test mean-pooling produces correct output."""
-        router = MemoryGatingNetwork(
-            hidden_dim=768, num_experts=4, temperature=1.0, pooling_method="mean"
-        )
+        router = MemoryGatingNetwork(hidden_dim=768, num_experts=4, temperature=1.0, pooling_method="mean")
 
         hiddens = torch.randn(8, 16, 768)
         routing_probs, _, _ = router(hiddens)
@@ -497,9 +475,7 @@ class TestPoolingMethods:
 
     def test_max_pooling(self):
         """Test max-pooling produces correct output."""
-        router = MemoryGatingNetwork(
-            hidden_dim=768, num_experts=4, temperature=1.0, pooling_method="max"
-        )
+        router = MemoryGatingNetwork(hidden_dim=768, num_experts=4, temperature=1.0, pooling_method="max")
 
         hiddens = torch.randn(8, 16, 768)
         routing_probs, _, _ = router(hiddens)
@@ -513,15 +489,11 @@ class TestPoolingMethods:
 
         # Use same seed for fair comparison
         torch.manual_seed(42)
-        router_mean = MemoryGatingNetwork(
-            hidden_dim=768, num_experts=4, temperature=1.0, pooling_method="mean"
-        )
+        router_mean = MemoryGatingNetwork(hidden_dim=768, num_experts=4, temperature=1.0, pooling_method="mean")
         probs_mean, _, _ = router_mean(hiddens)
 
         torch.manual_seed(42)
-        router_max = MemoryGatingNetwork(
-            hidden_dim=768, num_experts=4, temperature=1.0, pooling_method="max"
-        )
+        router_max = MemoryGatingNetwork(hidden_dim=768, num_experts=4, temperature=1.0, pooling_method="max")
         probs_max, _, _ = router_max(hiddens)
 
         # Outputs should be different (different pooling strategies)

@@ -34,16 +34,14 @@ from torch.utils.data import DataLoader
 from transformers import XLNetForQuestionAnsweringSimple, XLNetTokenizerFast
 
 from gmmxlnet.models import GMMXLNetForQA
-from gmmxlnet.training import GMMTrainingConfig, gmm_balanced_config
+from gmmxlnet.training import GMMTrainingConfig
 from gmmxlnet.utils import GMMAnalyzer
 from memxlnet.data import ChunkedSquadDataset
 
 
 def parse_args():
     """Parse command-line arguments."""
-    parser = argparse.ArgumentParser(
-        description="Train GMM-XLNet model with multi-expert memory"
-    )
+    parser = argparse.ArgumentParser(description="Train GMM-XLNet model with multi-expert memory")
 
     # Model architecture
     parser.add_argument(
@@ -168,7 +166,7 @@ def setup_tokenizer(base_model_name, memory_slots):
 
     tokenizer.add_special_tokens({"additional_special_tokens": memory_tokens})
 
-    print(f"✓ Tokenizer initialized")
+    print("✓ Tokenizer initialized")
     print(f"  - Base model: {base_model_name}")
     print(f"  - Total vocabulary size: {len(tokenizer)}")
     print(f"  - Memory tokens added: {len(memory_tokens)}")
@@ -198,7 +196,7 @@ def setup_model(args, tokenizer):
         use_gmm_memory=True,
     )
 
-    print(f"✓ GMM-XLNet model created")
+    print("✓ GMM-XLNet model created")
     print(f"  - Number of experts: {model.num_experts}")
     print(f"  - Memory slots per expert: {model.memory_slots}")
     print(f"  - Routing mode: {model.routing_mode}")
@@ -232,7 +230,7 @@ def load_datasets(args, tokenizer):
         max_n_segs=4,
     )
 
-    print(f"✓ Datasets loaded")
+    print("✓ Datasets loaded")
     print(f"  - Training examples: {len(train_dataset)}")
     print(f"  - Validation examples: {len(val_dataset)}")
     print(f"  - Documents in training set: {len(train_dataset.get_all_documents())}")
@@ -269,7 +267,7 @@ def create_config(args):
         hub_model_id=args.hub_model_id if args.push_to_hub else None,
     )
 
-    print(f"✓ Configuration created")
+    print("✓ Configuration created")
     print(f"  - Epochs: {config.num_epochs}")
     print(f"  - Batch size: {config.batch_size}")
     print(f"  - Learning rate: {config.learning_rate}")
@@ -322,9 +320,7 @@ def train_model(model, train_dataset, val_dataset, config):
 
             # Initialize memory if needed
             if batch_idx == 0 or "memory_state" not in locals():
-                memory_state = model.get_initial_memory(
-                    batch_size=input_ids.size(0), device=device
-                )
+                memory_state = model.get_initial_memory(batch_size=input_ids.size(0), device=device)
 
             # Forward pass
             outputs = model(
@@ -366,10 +362,12 @@ def train_model(model, train_dataset, val_dataset, config):
                 avg_routing = [u / routing_stats["steps"] for u in routing_stats["expert_utilization"]]
                 avg_entropy = routing_stats["entropy_sum"] / routing_stats["steps"]
 
-                print(f"  Step {batch_idx + 1}/{len(train_loader)}: "
-                      f"Loss={avg_loss:.4f}, "
-                      f"Entropy={avg_entropy:.3f}, "
-                      f"Expert Util={[f'{u:.2f}' for u in avg_routing]}")
+                print(
+                    f"  Step {batch_idx + 1}/{len(train_loader)}: "
+                    f"Loss={avg_loss:.4f}, "
+                    f"Entropy={avg_entropy:.3f}, "
+                    f"Expert Util={[f'{u:.2f}' for u in avg_routing]}"
+                )
 
                 total_loss = 0.0
 
@@ -404,12 +402,12 @@ def analyze_routing(model, val_dataset):
         max_segments=100,  # Analyze first 100 segments
     )
 
-    print(f"✓ Routing analysis completed")
-    print(f"\n  Expert Utilization:")
+    print("✓ Routing analysis completed")
+    print("\n  Expert Utilization:")
     for i, util in enumerate(routing_stats["expert_utilization"]):
         print(f"    Expert {i}: {util:.2%}")
 
-    print(f"\n  Routing Entropy:")
+    print("\n  Routing Entropy:")
     print(f"    Mean: {routing_stats['mean_entropy']:.3f}")
     print(f"    Std:  {routing_stats['std_entropy']:.3f}")
 
@@ -417,12 +415,12 @@ def analyze_routing(model, val_dataset):
     diversity = analyzer.compute_expert_diversity()
     consistency = analyzer.compute_routing_consistency()
 
-    print(f"\n  Expert Diversity (cosine similarity):")
+    print("\n  Expert Diversity (cosine similarity):")
     print(f"    Average off-diagonal: {diversity[~torch.eye(len(diversity), dtype=bool)].mean():.3f}")
-    print(f"    (< 0.5 indicates good specialization)")
+    print("    (< 0.5 indicates good specialization)")
 
     print(f"\n  Routing Consistency: {consistency:.3f}")
-    print(f"    (< 0.3: context-dependent, > 0.8: may indicate collapse)")
+    print("    (< 0.3: context-dependent, > 0.8: may indicate collapse)")
 
     return routing_stats, analyzer
 

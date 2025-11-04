@@ -62,16 +62,12 @@ class ExpertUpdater(nn.Module):
         # Per-expert gate networks (W_g): sigmoid(W_g @ [M_j, h_write])
         # Input: concatenated [M_j_prev, write_hiddens] of size 2*hidden_dim
         # Output: gate values of size hidden_dim
-        self.gate_networks = nn.ModuleList([
-            nn.Linear(2 * hidden_dim, hidden_dim) for _ in range(num_experts)
-        ])
+        self.gate_networks = nn.ModuleList([nn.Linear(2 * hidden_dim, hidden_dim) for _ in range(num_experts)])
 
         # Per-expert update networks (W_u): tanh(W_u @ [M_j, h_write])
         # Input: concatenated [M_j_prev, write_hiddens] of size 2*hidden_dim
         # Output: update candidate of size hidden_dim
-        self.update_networks = nn.ModuleList([
-            nn.Linear(2 * hidden_dim, hidden_dim) for _ in range(num_experts)
-        ])
+        self.update_networks = nn.ModuleList([nn.Linear(2 * hidden_dim, hidden_dim) for _ in range(num_experts)])
 
     def forward(
         self,
@@ -111,7 +107,7 @@ class ExpertUpdater(nn.Module):
 
             # Step 3: Extract and reshape routing probability for this expert
             p_j = routing_probs[:, j]  # (batch,)
-            p_j = p_j.view(-1, 1, 1)   # Broadcast: (batch, 1, 1)
+            p_j = p_j.view(-1, 1, 1)  # Broadcast: (batch, 1, 1)
 
             # Step 4: Modulate gate with routing probability
             modulated_gate = self.apply_routing_modulation(g_j, p_j)
@@ -221,9 +217,7 @@ class ExpertUpdater(nn.Module):
         """
         # Validate expert_states is a list of correct length
         if not isinstance(expert_states, list):
-            raise ValueError(
-                f"expert_states must be a list, got {type(expert_states).__name__}"
-            )
+            raise ValueError(f"expert_states must be a list, got {type(expert_states).__name__}")
         if len(expert_states) != self.num_experts:
             raise ValueError(
                 f"expert_states must contain {self.num_experts} experts, got {len(expert_states)}. "
@@ -233,22 +227,17 @@ class ExpertUpdater(nn.Module):
         # Validate write_hiddens shape
         if write_hiddens.dim() != 3:
             raise ValueError(
-                f"write_hiddens must be 3D (batch_size, memory_slots, hidden_dim), "
-                f"got {write_hiddens.dim()}D tensor"
+                f"write_hiddens must be 3D (batch_size, memory_slots, hidden_dim), got {write_hiddens.dim()}D tensor"
             )
         batch_size, memory_slots, hidden_dim = write_hiddens.shape
         if hidden_dim != self.hidden_dim:
             raise ValueError(
-                f"write_hiddens hidden_dim must be {self.hidden_dim}, got {hidden_dim}. "
-                f"Configuration mismatch."
+                f"write_hiddens hidden_dim must be {self.hidden_dim}, got {hidden_dim}. Configuration mismatch."
             )
 
         # Validate routing_probs shape
         if routing_probs.dim() != 2:
-            raise ValueError(
-                f"routing_probs must be 2D (batch_size, num_experts), "
-                f"got {routing_probs.dim()}D tensor"
-            )
+            raise ValueError(f"routing_probs must be 2D (batch_size, num_experts), got {routing_probs.dim()}D tensor")
         if routing_probs.shape != (batch_size, self.num_experts):
             raise ValueError(
                 f"routing_probs must have shape ({batch_size}, {self.num_experts}), "
@@ -271,7 +260,4 @@ class ExpertUpdater(nn.Module):
 
     def __repr__(self) -> str:
         """String representation of ExpertUpdater."""
-        return (
-            f"ExpertUpdater(hidden_dim={self.hidden_dim}, "
-            f"num_experts={self.num_experts})"
-        )
+        return f"ExpertUpdater(hidden_dim={self.hidden_dim}, num_experts={self.num_experts})"

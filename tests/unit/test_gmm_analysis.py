@@ -44,7 +44,8 @@ def mock_model():
 
     # Mock expert memories
     expert_memories = [
-        torch.randn(8, 768) for _ in range(4)  # (memory_slots, hidden_dim)
+        torch.randn(8, 768)
+        for _ in range(4)  # (memory_slots, hidden_dim)
     ]
     memory_mixture.expert_memories = expert_memories
 
@@ -63,13 +64,15 @@ def mock_routing_data():
     for i in range(num_segments):
         # Create routing probabilities (softmax normalized)
         probs = torch.randn(num_experts).softmax(dim=0).numpy()
-        routing_data.append({
-            "batch_idx": i // 2,
-            "item_idx": i % 2,
-            "segment_idx": i,
-            "routing_probs": probs.tolist(),
-            "document_id": f"doc_{i // 3}",
-        })
+        routing_data.append(
+            {
+                "batch_idx": i // 2,
+                "item_idx": i % 2,
+                "segment_idx": i,
+                "routing_probs": probs.tolist(),
+                "document_id": f"doc_{i // 3}",
+            }
+        )
 
     return routing_data
 
@@ -197,9 +200,7 @@ class TestGMMAnalyzer:
 
         # Add uniform routing data
         uniform_probs = [0.25, 0.25, 0.25, 0.25]
-        analyzer.routing_data = [
-            {"routing_probs": uniform_probs} for _ in range(10)
-        ]
+        analyzer.routing_data = [{"routing_probs": uniform_probs} for _ in range(10)]
 
         entropy = analyzer.compute_routing_entropy()
 
@@ -244,7 +245,7 @@ class TestGMMAnalyzer:
         for i in range(4):
             memory = torch.zeros(8, dim)
             # Each expert focuses on different dimensions
-            memory[:, i * (dim // 4):(i + 1) * (dim // 4)] = 1.0
+            memory[:, i * (dim // 4) : (i + 1) * (dim // 4)] = 1.0
             expert_memories.append(memory)
 
         memory_mixture.expert_memories = expert_memories
@@ -394,11 +395,13 @@ class TestVisualizationFunctions:
     def test_plot_specialization_dendrogram(self):
         """Test dendrogram generation."""
         # Create mock linkage matrix
-        linkage_matrix = np.array([
-            [0, 1, 0.5, 2],
-            [2, 3, 1.0, 2],
-            [4, 5, 1.5, 4],
-        ])
+        linkage_matrix = np.array(
+            [
+                [0, 1, 0.5, 2],
+                [2, 3, 1.0, 2],
+                [4, 5, 1.5, 4],
+            ]
+        )
 
         fig = plot_specialization_dendrogram(linkage_matrix)
 
@@ -472,10 +475,12 @@ class TestIntegrationWithModel:
         # Mock model outputs with routing_info dict (matching real model interface)
         mock_outputs = {
             "routing_info": {
-                "routing_probs": torch.tensor([
-                    [0.4, 0.3, 0.2, 0.1],
-                    [0.1, 0.2, 0.3, 0.4],
-                ])
+                "routing_probs": torch.tensor(
+                    [
+                        [0.4, 0.3, 0.2, 0.1],
+                        [0.1, 0.2, 0.3, 0.4],
+                    ]
+                )
             }
         }
 

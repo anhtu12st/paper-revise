@@ -8,6 +8,7 @@ expert activation patterns, routing behavior, and memory specialization.
 from pathlib import Path
 from typing import Any
 
+import matplotlib.cm as cm
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy.cluster.hierarchy import dendrogram
@@ -93,7 +94,7 @@ def plot_expert_activation_timeline(
     fig, ax = plt.subplots(figsize=figsize)
 
     # Plot line for each expert
-    colors = plt.cm.tab10(np.linspace(0, 1, num_experts))
+    colors = cm.get_cmap("tab10")(np.linspace(0, 1, num_experts))
     for expert_idx in range(num_experts):
         ax.plot(
             range(num_segments),
@@ -198,7 +199,7 @@ def plot_expert_utilization_bar(
     bars = ax.bar(
         range(len(experts)),
         frequencies,
-        color=plt.cm.viridis(np.linspace(0.3, 0.9, len(experts))),
+        color=cm.get_cmap("viridis")(np.linspace(0.3, 0.9, len(experts))),
         edgecolor="black",
         linewidth=1.5,
     )
@@ -256,20 +257,20 @@ def plot_routing_entropy_distribution(
         matplotlib Figure object
     """
     # Compute entropy for each segment
-    entropies = []
+    entropies: list[float] = []
     for record in routing_data:
         probs = np.array(record["routing_probs"])
         entropy = -np.sum(probs * np.log(probs + 1e-10))
         entropies.append(entropy)
 
-    entropies = np.array(entropies)
+    entropies_array = np.array(entropies)
 
     # Create figure
     fig, ax = plt.subplots(figsize=figsize)
 
     # Plot histogram
     n, bins_edges, patches = ax.hist(
-        entropies,
+        entropies_array,
         bins=bins,
         color="steelblue",
         edgecolor="black",
@@ -277,7 +278,7 @@ def plot_routing_entropy_distribution(
     )
 
     # Add mean line
-    mean_entropy = np.mean(entropies)
+    mean_entropy = np.mean(entropies_array)
     ax.axvline(
         mean_entropy,
         color="red",
@@ -307,7 +308,7 @@ def plot_routing_entropy_distribution(
 def generate_all_visualizations(
     analyzer: Any,
     output_dir: str,
-    formats: list[str] = None,
+    formats: list[str] | None = None,
     dpi: int = 300,
 ) -> dict[str, str]:
     """

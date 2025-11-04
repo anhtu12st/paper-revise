@@ -69,15 +69,11 @@ class GMMTrainingConfig(TrainingConfig):
         # Validate routing_mode
         valid_routing_modes = ["write-based", "read-based"]
         if self.routing_mode not in valid_routing_modes:
-            raise ValueError(
-                f"routing_mode must be one of {valid_routing_modes}, got '{self.routing_mode}'"
-            )
+            raise ValueError(f"routing_mode must be one of {valid_routing_modes}, got '{self.routing_mode}'")
 
         # Validate entropy_regularization_weight
         if not isinstance(self.entropy_regularization_weight, (int, float)) or self.entropy_regularization_weight < 0:
-            raise ValueError(
-                f"entropy_regularization_weight must be >= 0, got {self.entropy_regularization_weight}"
-            )
+            raise ValueError(f"entropy_regularization_weight must be >= 0, got {self.entropy_regularization_weight}")
 
         # Validate load_balance_weight
         if not isinstance(self.load_balance_weight, (int, float)) or self.load_balance_weight < 0:
@@ -95,9 +91,7 @@ class GMMTrainingConfig(TrainingConfig):
             valid_strategies = ["learned", "zeros"]
             for i, strategy in enumerate(self.expert_init_strategies):
                 if strategy not in valid_strategies:
-                    raise ValueError(
-                        f"expert_init_strategies[{i}] must be one of {valid_strategies}, got '{strategy}'"
-                    )
+                    raise ValueError(f"expert_init_strategies[{i}] must be one of {valid_strategies}, got '{strategy}'")
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize configuration to dictionary.
@@ -174,7 +168,7 @@ def gmm_small_config(**kwargs) -> GMMTrainingConfig:
         GMMTrainingConfig configured for small-scale GMM training
     """
     # Set defaults, then merge with kwargs (kwargs take precedence)
-    defaults = {
+    defaults: dict[str, Any] = {
         "use_gmm_memory": True,
         "num_memory_experts": 2,
         "routing_temperature": 1.0,
@@ -201,7 +195,7 @@ def gmm_balanced_config(**kwargs) -> GMMTrainingConfig:
         GMMTrainingConfig configured for balanced GMM training
     """
     # Set defaults, then merge with kwargs (kwargs take precedence)
-    defaults = {
+    defaults: dict[str, Any] = {
         "use_gmm_memory": True,
         "num_memory_experts": 4,
         "routing_temperature": 1.0,
@@ -228,7 +222,7 @@ def gmm_large_config(**kwargs) -> GMMTrainingConfig:
         GMMTrainingConfig configured for large-scale GMM training
     """
     # Set defaults, then merge with kwargs (kwargs take precedence)
-    defaults = {
+    defaults: dict[str, Any] = {
         "use_gmm_memory": True,
         "num_memory_experts": 8,
         "routing_temperature": 1.0,
