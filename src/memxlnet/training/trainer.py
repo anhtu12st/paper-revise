@@ -1659,9 +1659,9 @@ class XLNetRecurrentTrainer:
                 for ex_id, active in zip(example_ids, document_mask.tolist()):
                     if not active:
                         if is_gmm_model:
-                            # GMM model: get expert_0 memory from dictionary
+                            # GMM model: get full expert dictionary for inactive document
                             initial_memory = self.model.get_initial_memory(1, device=self.device)
-                            memory_states.append(initial_memory["expert_0"])
+                            memory_states.append(initial_memory)
                         else:
                             # Base model: use existing logic
                             memory_states.append(self.model.get_initial_memory(1, device=self.device)[0])
@@ -1684,13 +1684,42 @@ class XLNetRecurrentTrainer:
                         expert_key = f"expert_{expert_idx}"
                         expert_memories = []
                         for memory_state in memory_states:
-                            # memory_state is a dictionary with expert keys
-                            expert_memories.append(memory_state[expert_key])
-                        # Stack memories for this expert across batch
-                        memory_state_batch[expert_key] = torch.stack(expert_memories, dim=0)
+                            # memory_state is a dictionary with expert keys for GMM models
+                            if isinstance(memory_state, dict):
+                                # Extract expert memory and ensure it's 2D [memory_slots, hidden_dim]
+                                expert_memory = memory_state[expert_key]
+                                if expert_memory.dim() == 3:  # [1, memory_slots, hidden_dim]
+                                    expert_memory = expert_memory.squeeze(0)  # -> [memory_slots, hidden_dim]
+                                elif expert_memory.dim() == 2:  # [memory_slots, hidden_dim]
+                                    pass  # Already correct shape
+                                else:
+                                    raise ValueError(f"Unexpected expert memory shape: {expert_memory.shape}, expected 2D or 3D tensor")
+                                expert_memories.append(expert_memory)
+                            else:
+                                raise ValueError(f"Expected dictionary for GMM memory state, got {type(memory_state)}")
+
+                        # Stack memories for this expert across batch -> [batch_size, memory_slots, hidden_dim]
+                        if expert_memories:
+                            memory_state_batch[expert_key] = torch.stack(expert_memories, dim=0)
+                        else:
+                            # Handle empty batch case
+                            memory_state_batch[expert_key] = torch.empty(0, 16, 768, device=self.device)
                 else:
                     # Base MemXLNet model: original logic
                     memory_state_batch = torch.stack(memory_states, dim=0)
+
+                # Validate memory state batch before passing to model
+                if is_gmm_model:
+                    if not isinstance(memory_state_batch, dict):
+                        raise ValueError(f"Expected dict for GMM memory_state_batch, got {type(memory_state_batch)}")
+
+                    for expert_key, expert_tensor in memory_state_batch.items():
+                        if expert_tensor.dim() != 3:
+                            raise ValueError(f"Expert {expert_key} tensor must be 3D (batch_size, memory_slots, hidden_dim), got {expert_tensor.dim()}D tensor with shape {expert_tensor.shape}")
+
+                        batch_size = input_ids.size(0)
+                        if expert_tensor.size(0) != batch_size:
+                            raise ValueError(f"Expert {expert_key} batch size mismatch: expected {batch_size}, got {expert_tensor.size(0)}")
 
                 outputs = self.model(
                     input_ids=input_ids,
