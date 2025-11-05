@@ -209,12 +209,32 @@ def main():
                                     expert_memory = initial_memory[f"expert_{expert_idx}"]
                                 else:
                                     expert_memory = prev[f"expert_{expert_idx}"].to(self.device)
-                            expert_memories.append(expert_memory.squeeze(0))  # Remove batch dim
 
-                        # Stack expert memories across batch (already on correct device)
-                        memory_state_batch[f"expert_{expert_idx}"] = torch.stack(expert_memories, dim=0)
+                            # Ensure consistent tensor shape: remove batch dimension if present
+                            if expert_memory.dim() == 3:  # Shape: [1, memory_slots, hidden_dim]
+                                expert_memory = expert_memory.squeeze(0)  # -> [memory_slots, hidden_dim]
+                            elif expert_memory.dim() == 2:  # Shape: [memory_slots, hidden_dim]
+                                pass  # Already correct shape
+                            else:
+                                raise ValueError(f"Unexpected expert memory shape: {expert_memory.shape}, expected 2D or 3D tensor")
 
-                    # Validate device consistency before forward pass with improved device handling
+                            expert_memories.append(expert_memory)
+
+                        # Validate all expert memories have the same shape before stacking
+                        if expert_memories:
+                            expected_shape = expert_memories[0].shape
+                            for i, mem in enumerate(expert_memories):
+                                if mem.shape != expected_shape:
+                                    raise ValueError(f"Expert {expert_idx} memory {i} has shape {mem.shape}, expected {expected_shape}")
+
+                            # Stack expert memories across batch (already on correct device)
+                            memory_state_batch[f"expert_{expert_idx}"] = torch.stack(expert_memories, dim=0)
+                        else:
+                            # Handle empty batch case - create empty tensor with correct shape
+                            # Use memory_slots=16, hidden_dim=768 as defaults based on GMM model
+                            memory_state_batch[f"expert_{expert_idx}"] = torch.empty(0, 16, 768, device=self.device)
+
+                    # Validate device consistency and tensor shapes before forward pass
                     if not eval_mode:
                         def normalize_device(device_str):
                             """Normalize device strings to handle cuda vs cuda:0 equivalency"""
@@ -226,12 +246,31 @@ def main():
 
                         current_device_normalized = normalize_device(self.device)
 
+                        # Validate device consistency
                         for expert_key, expert_tensor in memory_state_batch.items():
                             tensor_device_normalized = normalize_device(expert_tensor.device)
                             if tensor_device_normalized != current_device_normalized:
                                 logger.warning(f"Expert {expert_key} device mismatch: {expert_tensor.device} vs {self.device} (normalized: {tensor_device_normalized} vs {current_device_normalized})")
                                 memory_state_batch[expert_key] = expert_tensor.to(self.device)
                                 logger.debug(f"Fixed {expert_key} device placement to {self.device}")
+
+                        # Validate tensor shapes are consistent across experts
+                        if memory_state_batch:
+                            shapes = [(k, v.shape) for k, v in memory_state_batch.items()]
+                            logger.debug(f"GMM memory state shapes: {shapes}")
+
+                            # Check all experts have the same shape
+                            first_shape = None
+                            for expert_key, expert_tensor in memory_state_batch.items():
+                                if first_shape is None:
+                                    first_shape = expert_tensor.shape
+                                elif expert_tensor.shape != first_shape:
+                                    logger.error(f"Shape mismatch detected: {expert_key} has shape {expert_tensor.shape}, expected {first_shape}")
+                                    raise ValueError(f"Expert tensor shapes are inconsistent: {expert_key}: {expert_tensor.shape} vs expected: {first_shape}")
+
+                            logger.debug(f"✅ All expert tensors have consistent shape: {first_shape}")
+                        else:
+                            logger.warning("Memory state batch is empty - no tensors to validate")
 
                     try:
                         outputs = self.model(

@@ -179,10 +179,28 @@ class TestGMMTrainerIntegration:
                         # Existing document: use stored memory
                         expert_memory = prev[f"expert_{expert_idx}"]
 
-                expert_memories.append(expert_memory.squeeze(0))  # Remove batch dim
+                # Ensure consistent tensor shape: remove batch dimension if present
+                if expert_memory.dim() == 3:  # Shape: [1, memory_slots, hidden_dim]
+                    expert_memory = expert_memory.squeeze(0)  # -> [memory_slots, hidden_dim]
+                elif expert_memory.dim() == 2:  # Shape: [memory_slots, hidden_dim]
+                    pass  # Already correct shape
+                else:
+                    raise ValueError(f"Unexpected expert memory shape: {expert_memory.shape}, expected 2D or 3D tensor")
 
-            # Stack expert memories across batch
-            memory_state_batch[f"expert_{expert_idx}"] = torch.stack(expert_memories, dim=0)
+                expert_memories.append(expert_memory)
+
+            # Validate all expert memories have the same shape before stacking
+            if expert_memories:
+                expected_shape = expert_memories[0].shape
+                for i, mem in enumerate(expert_memories):
+                    if mem.shape != expected_shape:
+                        raise ValueError(f"Expert {expert_idx} memory {i} has shape {mem.shape}, expected {expected_shape}")
+
+                # Stack expert memories across batch
+                memory_state_batch[f"expert_{expert_idx}"] = torch.stack(expert_memories, dim=0)
+            else:
+                # Handle empty batch case
+                memory_state_batch[f"expert_{expert_idx}"] = torch.empty(0, 16, 768, device=device)
 
         # Verify batch memory state structure
         assert isinstance(memory_state_batch, dict)
