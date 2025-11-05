@@ -183,6 +183,14 @@ def main():
                 per_doc_labels_start = {}
                 per_doc_labels_end = {}
 
+                def normalize_device(device_str):
+                    """Normalize device strings to handle cuda vs cuda:0 equivalency"""
+                    if isinstance(device_str, torch.device):
+                        device_str = str(device_str)
+                    if device_str == "cuda":
+                        return "cuda:0"  # Normalize cuda to cuda:0
+                    return device_str
+
                 for time_step, batch in enumerate(time_step_batches):
                     input_ids = batch["input_ids"].to(self.device)
                     attention_mask = batch["attention_mask"].to(self.device)
@@ -236,14 +244,6 @@ def main():
 
                     # Validate device consistency and tensor shapes before forward pass
                     if not eval_mode:
-                        def normalize_device(device_str):
-                            """Normalize device strings to handle cuda vs cuda:0 equivalency"""
-                            if isinstance(device_str, torch.device):
-                                device_str = str(device_str)
-                            if device_str == "cuda":
-                                return "cuda:0"  # Normalize cuda to cuda:0
-                            return device_str
-
                         current_device_normalized = normalize_device(self.device)
 
                         # Validate device consistency
@@ -331,8 +331,11 @@ def main():
                             # Validate memory bank storage consistency
                             if not eval_mode:
                                 for expert_key, expert_tensor in self.memory_bank[ex_id].items():
-                                    if expert_tensor.device != self.device:
-                                        logger.warning(f"Memory bank {ex_id} expert {expert_key} device mismatch: {expert_tensor.device} vs {self.device}")
+                                    # Use device normalization to handle cuda vs cuda:0 equivalency
+                                    tensor_device_normalized = normalize_device(expert_tensor.device)
+                                    target_device_normalized = normalize_device(self.device)
+                                    if tensor_device_normalized != target_device_normalized:
+                                        logger.warning(f"Memory bank {ex_id} expert {expert_key} device mismatch: {expert_tensor.device} vs {self.device} (normalized: {tensor_device_normalized} vs {target_device_normalized})")
                                         self.memory_bank[ex_id][expert_key] = expert_tensor.to(self.device)
 
                                 # Monitor memory bank size
