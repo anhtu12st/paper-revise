@@ -240,6 +240,14 @@ def main():
                 # Non-GMM model: use parent's memory processing
                 return super()._process_document_batch_with_memory(time_step_batches, eval_mode)
 
+        def train_one_document_batch(self, time_step_batches):
+            """Override train_one_document_batch to handle GMM memory structure."""
+            if hasattr(self.model, 'use_gmm_memory') and self.model.use_gmm_memory:
+                return self._process_document_batch_with_memory(time_step_batches, eval_mode=False)
+            else:
+                # Non-GMM model: use parent's implementation
+                return super().train_one_document_batch(time_step_batches)
+
     trainer = GMMTrainer(config)
 
     try:
