@@ -151,6 +151,9 @@ class GMMXLNetForQA(nn.Module):
             # Get unbatched expert state from mixture
             expert_param = self.memory_mixture.get_expert_state(expert_idx)  # (memory_slots, hidden_dim)
 
+            # Ensure expert parameter is on the correct device
+            expert_param = expert_param.to(device)
+
             # Expand to batch dimension
             expert_state = expert_param.unsqueeze(0).expand(
                 batch_size, self.memory_slots, self.hidden_dim
@@ -307,6 +310,12 @@ class GMMXLNetForQA(nn.Module):
         # Initialize memory state if not provided
         if memory_state is None and self.use_gmm_memory:
             memory_state = self.get_initial_memory(batch_size, device)
+        elif memory_state is not None and self.use_gmm_memory:
+            # Ensure provided memory_state tensors are on the correct device
+            memory_state = {
+                expert_key: tensor.to(device)
+                for expert_key, tensor in memory_state.items()
+            }
 
         # Forward pass through base XLNet model
         outputs = self.base(

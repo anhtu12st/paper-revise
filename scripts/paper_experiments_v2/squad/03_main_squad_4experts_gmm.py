@@ -184,7 +184,7 @@ def main():
                                     initial_memory = self.model.get_initial_memory(1, self.device)
                                     expert_memory = initial_memory[f"expert_{expert_idx}"]
                                 else:
-                                    expert_memory = prev[f"expert_{expert_idx}"]
+                                    expert_memory = prev[f"expert_{expert_idx}"].to(self.device)
                             expert_memories.append(expert_memory.squeeze(0))  # Remove batch dim
 
                         # Stack expert memories across batch
@@ -208,8 +208,11 @@ def main():
                     # Collect logits and labels per document
                     for ex_id, active in zip(batch["example_ids"], document_mask.tolist()):
                         if active and ex_id in self.dataset.example_to_segments:
-                            # Update memory bank for next time step
-                            self.memory_bank[ex_id] = new_memory_state
+                            # Update memory bank for next time step (ensure on correct device)
+                            self.memory_bank[ex_id] = {
+                                expert_key: tensor.to(self.device)
+                                for expert_key, tensor in new_memory_state.items()
+                            }
 
                             # Store logits for this document (use first segment for simplicity)
                             ex_idx = batch["example_ids"].tolist().index(ex_id)
