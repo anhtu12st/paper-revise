@@ -144,6 +144,10 @@ def main():
                 )
                 logger.info(f"✅ GMM model created with {config.num_memory_experts} experts")
 
+                # Ensure GMM model is on the correct device
+                self.model = self.model.to(self.device)
+                logger.info(f"✅ GMM model moved to device: {self.device}")
+
         def _process_document_batch_with_memory(self, time_step_batches, eval_mode=False):
             """Override memory processing for GMM models."""
             if hasattr(self.model, 'use_gmm_memory') and self.model.use_gmm_memory:
@@ -153,6 +157,11 @@ def main():
                 # Initialize per-document memory bank
                 if not hasattr(self, "memory_bank"):
                     self.memory_bank: dict[str, dict[str, torch.Tensor]] = {}
+
+                # Device placement validation
+                if not eval_mode:
+                    logger.debug(f"GMM processing on device: {self.device}")
+                    logger.debug(f"Model device: {next(self.model.parameters()).device}")
 
                 per_doc_logits_start = {}
                 per_doc_logits_end = {}
@@ -167,14 +176,14 @@ def main():
                     end_positions = batch["end_positions"].to(self.device)
                     document_mask = batch["document_mask"].to(self.device)
 
-                    # Build GMM memory state dict per batch ordering
+                    # Build GMM memory state dict per batch ordering with device consistency
                     memory_state_batch = {}
                     for expert_idx in range(self.model.num_experts):
                         expert_memories = []
 
                         for ex_id, active in zip(batch["example_ids"], document_mask.tolist()):
                             if not active:
-                                # New document: use initial memory
+                                # New document: use initial memory (already on correct device)
                                 initial_memory = self.model.get_initial_memory(1, self.device)
                                 expert_memory = initial_memory[f"expert_{expert_idx}"]
                             else:
@@ -187,19 +196,36 @@ def main():
                                     expert_memory = prev[f"expert_{expert_idx}"].to(self.device)
                             expert_memories.append(expert_memory.squeeze(0))  # Remove batch dim
 
-                        # Stack expert memories across batch
+                        # Stack expert memories across batch (already on correct device)
                         memory_state_batch[f"expert_{expert_idx}"] = torch.stack(expert_memories, dim=0)
 
-                    outputs = self.model(
-                        input_ids=input_ids,
-                        attention_mask=attention_mask,
-                        token_type_ids=token_type_ids,
-                        start_positions=start_positions,
-                        end_positions=end_positions,
-                        memory_state=memory_state_batch,
-                        mem_read_ids=self.mem_token_info.get("mem_read_ids") if self.mem_token_info else None,
-                        mem_write_ids=self.mem_token_info.get("mem_write_ids") if self.mem_token_info else None,
-                    )
+                    # Validate device consistency before forward pass
+                    if not eval_mode:
+                        for expert_key, expert_tensor in memory_state_batch.items():
+                            if expert_tensor.device != self.device:
+                                logger.warning(f"Expert {expert_key} device mismatch: {expert_tensor.device} vs {self.device}")
+                                memory_state_batch[expert_key] = expert_tensor.to(self.device)
+
+                    try:
+                        outputs = self.model(
+                            input_ids=input_ids,
+                            attention_mask=attention_mask,
+                            token_type_ids=token_type_ids,
+                            start_positions=start_positions,
+                            end_positions=end_positions,
+                            memory_state=memory_state_batch,
+                            mem_read_ids=self.mem_token_info.get("mem_read_ids") if self.mem_token_info else None,
+                            mem_write_ids=self.mem_token_info.get("mem_write_ids") if self.mem_token_info else None,
+                        )
+                    except RuntimeError as e:
+                        if "Expected all tensors to be on the same device" in str(e):
+                            logger.error(f"Device placement error: {e}")
+                            logger.error(f"Input IDs device: {input_ids.device}")
+                            logger.error(f"Memory state devices: {[k + ':' + str(v.device) for k, v in memory_state_batch.items()]}")
+                            logger.error(f"Model device: {next(self.model.parameters()).device}")
+                            raise RuntimeError(f"GMM device placement error: {e}. Check that all tensors are on {self.device}")
+                        else:
+                            raise
 
                     start_logits = outputs["start_logits"]
                     end_logits = outputs["end_logits"]
@@ -207,12 +233,16 @@ def main():
 
                     # Collect logits and labels per document
                     for ex_id, active in zip(batch["example_ids"], document_mask.tolist()):
-                        if active and ex_id in self.dataset.example_to_segments:
+                        if active:
                             # Update memory bank for next time step (ensure on correct device)
                             self.memory_bank[ex_id] = {
-                                expert_key: tensor.to(self.device)
+                                expert_key: tensor.detach().to(self.device)  # Use detach() to avoid gradient storage issues
                                 for expert_key, tensor in new_memory_state.items()
                             }
+
+                            # Validate memory bank storage
+                            if not eval_mode and len(self.memory_bank) > 1000:  # Prevent memory leaks
+                                logger.warning(f"Memory bank has grown to {len(self.memory_bank)} documents, consider cleanup")
 
                             # Store logits for this document (use first segment for simplicity)
                             ex_idx = batch["example_ids"].tolist().index(ex_id)
@@ -250,6 +280,24 @@ def main():
             else:
                 # Non-GMM model: use parent's implementation
                 return super().train_one_document_batch(time_step_batches)
+
+        def _clear_memory_bank(self):
+            """Clear the memory bank to prevent memory leaks between epochs."""
+            if hasattr(self, 'memory_bank'):
+                self.memory_bank.clear()
+                logger.debug("Cleared GMM memory bank")
+
+        def on_epoch_end(self):
+            """Called at the end of each epoch to cleanup resources."""
+            if hasattr(self.model, 'use_gmm_memory') and self.model.use_gmm_memory:
+                self._clear_memory_bank()
+                # Reset GMM model memory
+                self.model.reset_memory()
+                logger.debug("Reset GMM model memory at epoch end")
+
+            # Call parent implementation if it exists
+            if hasattr(super(), 'on_epoch_end'):
+                super().on_epoch_end()
 
     trainer = GMMTrainer(config)
 

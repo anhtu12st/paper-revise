@@ -1,0 +1,18 @@
+{
+  "timestamp": "2025-11-05 14:15:38",
+  "run_name": "xlnet-long-qa",
+  "model_name": "xlnet-base-cased",
+  "dataset_name": "squad_v2",
+  "max_seq_length": 128,
+  "doc_stride": 128,
+  "progressive_segments": null,
+  "memory": {
+    "memory_num_tokens": 4,
+    "memory_update": "gated",
+    "memory_init": "learned",
+    "memory_impl": "token",
+    "use_global_softmax": true
+  },
+  "device": "cpu",
+  "fp16": false
+}
