@@ -129,6 +129,55 @@ class TestGMMTrainingConfigValidation:
         )
         assert config.use_gmm_memory is False
 
+    def test_memory_num_tokens_zero_rejected(self):
+        """Test memory_num_tokens=0 is rejected when GMM enabled."""
+        with pytest.raises(ValueError, match="GMM memory requires memory_num_tokens > 0"):
+            GMMTrainingConfig(
+                use_gmm_memory=True,
+                memory_num_tokens=0,
+            )
+
+    def test_memory_num_tokens_negative_rejected(self):
+        """Test negative memory_num_tokens is rejected when GMM enabled."""
+        with pytest.raises(ValueError, match="GMM memory requires memory_num_tokens > 0"):
+            GMMTrainingConfig(
+                use_gmm_memory=True,
+                memory_num_tokens=-1,
+            )
+
+    def test_memory_num_tokens_too_large_rejected(self):
+        """Test memory_num_tokens > 32 is rejected when GMM enabled."""
+        with pytest.raises(ValueError, match="memory_num_tokens should be <= 32"):
+            GMMTrainingConfig(
+                use_gmm_memory=True,
+                memory_num_tokens=33,
+            )
+
+    def test_memory_num_tokens_valid_accepted(self):
+        """Test valid memory_num_tokens values are accepted when GMM enabled."""
+        for valid_tokens in [1, 8, 16, 32]:
+            config = GMMTrainingConfig(
+                use_gmm_memory=True,
+                memory_num_tokens=valid_tokens,
+            )
+            assert config.memory_num_tokens == valid_tokens
+
+    def test_memory_num_tokens_bypass_when_gmm_disabled(self):
+        """Test memory_num_tokens validation bypassed when GMM disabled."""
+        # These should not raise errors when GMM is disabled
+        config1 = GMMTrainingConfig(
+            use_gmm_memory=False,
+            memory_num_tokens=0,
+        )
+        assert config1.memory_num_tokens == 0
+
+        config2 = GMMTrainingConfig(
+            use_gmm_memory=False,
+            memory_num_tokens=100,  # Would be invalid if GMM enabled
+        )
+        assert config2.memory_num_tokens == 100
+
+    
 
 class TestGMMTrainingConfigSerialization:
     """Test configuration serialization and deserialization."""

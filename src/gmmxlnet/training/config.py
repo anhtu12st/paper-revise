@@ -79,6 +79,21 @@ class GMMTrainingConfig(TrainingConfig):
         if not isinstance(self.load_balance_weight, (int, float)) or self.load_balance_weight < 0:
             raise ValueError(f"load_balance_weight must be >= 0, got {self.load_balance_weight}")
 
+        # NEW: Validate memory_num_tokens for GMM
+        if not hasattr(self, 'memory_num_tokens') or self.memory_num_tokens <= 0:
+            raise ValueError(
+                f"GMM memory requires memory_num_tokens > 0 for expert memory slots, "
+                f"got {getattr(self, 'memory_num_tokens', 'undefined')}. "
+                f"Recommended: memory_num_tokens=16 for most use cases. "
+                f"GMM experts need memory slots to store their independent states, unlike differentiable memory."
+            )
+        if self.memory_num_tokens > 32:
+            raise ValueError(
+                f"memory_num_tokens should be <= 32 for efficiency, "
+                f"got {self.memory_num_tokens}. "
+                f"Recommended: memory_num_tokens=16 for most use cases, memory_num_tokens=8 for smaller models."
+            )
+
         # Validate expert_init_strategies length
         if self.expert_init_strategies is not None:
             if len(self.expert_init_strategies) != self.num_memory_experts:

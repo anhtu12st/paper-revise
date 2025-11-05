@@ -306,6 +306,51 @@ config = GMMTrainingConfig(
 - **Default**: `["learned"] * k` if `None`
 - **Example**: `["orthogonal", "orthogonal", "learned", "learned"]`
 
+#### `memory_num_tokens` (int, inherited from TrainingConfig)
+- **Purpose**: Number of memory slots per expert
+- **Valid Range for GMM**: 1 to 32 (recommended: 16 for most use cases)
+- **GMM Requirements**: **Must be > 0 when `use_gmm_memory=True`**
+- **Key Difference from Differentiable Memory**:
+  - **GMM Memory**: Requires `memory_num_tokens > 0` (recommended: 16)
+  - **Differentiable Memory**: Uses `memory_num_tokens = 0` (no special tokens needed)
+- **Guidance**:
+  - **16 slots**: Standard for most applications (recommended)
+  - **8 slots**: Smaller models, limited GPU memory
+  - **32 slots**: Large models requiring maximum capacity
+- **Validation**: GMM configuration will raise `ValueError` if `memory_num_tokens <= 0` when GMM is enabled
+
+### Memory Token Requirements for GMM
+
+Unlike differentiable memory (which uses `memory_num_tokens=0`), GMM memory requires
+`memory_num_tokens > 0` to provide memory slots for each expert:
+
+```python
+# GMM Memory (CORRECT)
+config = GMMTrainingConfig(
+    use_gmm_memory=True,
+    memory_num_tokens=16,  # Provides 16 memory slots per expert
+    num_memory_experts=4,  # 4 experts × 16 slots = 64 total memory slots
+)
+
+# Differentiable Memory (CORRECT)
+config = TrainingConfig(
+    use_differentiable_memory=True,
+    memory_num_tokens=0,  # No special memory tokens needed
+)
+
+# GMM Memory (INCORRECT - will raise ValueError)
+config = GMMTrainingConfig(
+    use_gmm_memory=True,
+    memory_num_tokens=0,  # ❌ GMM experts need memory slots!
+)
+```
+
+**Why GMM Requires Memory Slots:**
+- Each expert maintains independent memory states
+- Memory slots store expert-specific information and learned patterns
+- Unlike differentiable memory which uses content-based addressing only
+- GMM experts need explicit memory locations for read/write operations
+
 ### Preset Configurations
 
 For quick experimentation, use preset factory functions:

@@ -59,7 +59,7 @@ def create_config():
         progressive_segments=[2],
         max_n_segs=2,
         # Memory configuration
-        memory_num_tokens=0,  # ✅ GMM memory doesn't need special tokens
+        memory_num_tokens=16,  # ✅ GMM memory requires slots for each expert (16 per expert)
         memory_update="gated",
         memory_init="learned",
         # ✅ GMM: Use multi-expert memory instead of single differentiable memory
@@ -72,8 +72,8 @@ def create_config():
         # Global softmax and training settings
         use_global_softmax=False,
         num_epochs=3,
-        train_batch_size=8,
-        eval_batch_size=16,
+        train_batch_size=4,
+        eval_batch_size=8,
         learning_rate=3e-5,
         weight_decay=0.01,
         warmup_ratio=0.1,
