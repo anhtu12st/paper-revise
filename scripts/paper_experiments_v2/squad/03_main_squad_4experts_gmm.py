@@ -71,15 +71,15 @@ def create_config():
         entropy_regularization_weight=0.0,
         # Global softmax and training settings
         use_global_softmax=False,
-        num_epochs=3,
-        train_batch_size=4,
-        eval_batch_size=8,
+        num_epochs=5,
+        train_batch_size=8,
+        eval_batch_size=16,
         learning_rate=3e-5,
         weight_decay=0.01,
         warmup_ratio=0.1,
         max_grad_norm=1.0,
         gradient_accumulation_steps=1,
-        eval_steps=500, # TOOD: change back to 5000
+        eval_steps=50000, # TOOD: change back to 5000
         save_steps=10000,
         logging_steps=500,
         output_dir="./outputs/paper_v2_squad_gmm_main_4experts",
