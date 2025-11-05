@@ -148,6 +148,21 @@ def main():
                 self.model = self.model.to(self.device)
                 logger.info(f"✅ GMM model moved to device: {self.device}")
 
+                # Validate GMM model components are on correct device
+                if hasattr(self.model, 'memory_mixture'):
+                    mixture_device = next(self.model.memory_mixture.parameters()).device
+                    logger.info(f"✅ Memory mixture device: {mixture_device}")
+                if hasattr(self.model, 'gating_network'):
+                    gating_device = next(self.model.gating_network.parameters()).device
+                    logger.info(f"✅ Gating network device: {gating_device}")
+
+                # Test initial memory creation
+                test_memory = self.model.get_initial_memory(1, self.device)
+                logger.info(f"✅ Test initial memory created for {len(test_memory)} experts")
+                for expert_key, expert_tensor in test_memory.items():
+                    logger.debug(f"  - {expert_key}: device={expert_tensor.device}, shape={expert_tensor.shape}")
+                logger.info("🔧 GMM model initialization validation complete")
+
         def _process_document_batch_with_memory(self, time_step_batches, eval_mode=False):
             """Override memory processing for GMM models."""
             if hasattr(self.model, 'use_gmm_memory') and self.model.use_gmm_memory:
@@ -199,12 +214,24 @@ def main():
                         # Stack expert memories across batch (already on correct device)
                         memory_state_batch[f"expert_{expert_idx}"] = torch.stack(expert_memories, dim=0)
 
-                    # Validate device consistency before forward pass
+                    # Validate device consistency before forward pass with improved device handling
                     if not eval_mode:
+                        def normalize_device(device_str):
+                            """Normalize device strings to handle cuda vs cuda:0 equivalency"""
+                            if isinstance(device_str, torch.device):
+                                device_str = str(device_str)
+                            if device_str == "cuda":
+                                return "cuda:0"  # Normalize cuda to cuda:0
+                            return device_str
+
+                        current_device_normalized = normalize_device(self.device)
+
                         for expert_key, expert_tensor in memory_state_batch.items():
-                            if expert_tensor.device != self.device:
-                                logger.warning(f"Expert {expert_key} device mismatch: {expert_tensor.device} vs {self.device}")
+                            tensor_device_normalized = normalize_device(expert_tensor.device)
+                            if tensor_device_normalized != current_device_normalized:
+                                logger.warning(f"Expert {expert_key} device mismatch: {expert_tensor.device} vs {self.device} (normalized: {tensor_device_normalized} vs {current_device_normalized})")
                                 memory_state_batch[expert_key] = expert_tensor.to(self.device)
+                                logger.debug(f"Fixed {expert_key} device placement to {self.device}")
 
                     try:
                         outputs = self.model(
@@ -219,12 +246,34 @@ def main():
                         )
                     except RuntimeError as e:
                         if "Expected all tensors to be on the same device" in str(e):
-                            logger.error(f"Device placement error: {e}")
-                            logger.error(f"Input IDs device: {input_ids.device}")
-                            logger.error(f"Memory state devices: {[k + ':' + str(v.device) for k, v in memory_state_batch.items()]}")
-                            logger.error(f"Model device: {next(self.model.parameters()).device}")
-                            raise RuntimeError(f"GMM device placement error: {e}. Check that all tensors are on {self.device}")
+                            logger.error("=" * 80)
+                            logger.error("🚨 GMM DEVICE PLACEMENT ERROR DETECTED")
+                            logger.error("=" * 80)
+                            logger.error(f"Root error: {e}")
+                            logger.error(f"Target device: {self.device}")
+                            logger.error(f"Input IDs device: {input_ids.device} | Shape: {input_ids.shape}")
+                            logger.error(f"Attention mask device: {attention_mask.device} | Shape: {attention_mask.shape}")
+                            logger.error(f"Start positions device: {start_positions.device} | Shape: {start_positions.shape}")
+                            logger.error(f"End positions device: {end_positions.device} | Shape: {end_positions.shape}")
+                            logger.error(f"Document mask device: {document_mask.device} | Shape: {document_mask.shape}")
+
+                            logger.error("Memory state devices:")
+                            for expert_key, expert_tensor in memory_state_batch.items():
+                                logger.error(f"  - {expert_key}: {expert_tensor.device} | Shape: {expert_tensor.shape} | Dtype: {expert_tensor.dtype}")
+
+                            logger.error(f"Model parameters device: {next(self.model.parameters()).device}")
+
+                            # Check model subcomponents
+                            if hasattr(self.model, 'memory_mixture'):
+                                logger.error(f"Memory mixture device: {next(self.model.memory_mixture.parameters()).device}")
+                            if hasattr(self.model, 'gating_network'):
+                                logger.error(f"Gating network device: {next(self.model.gating_network.parameters()).device}")
+
+                            logger.error("=" * 80)
+                            raise RuntimeError(f"GMM device placement error: {e}. All tensors must be on the same device: {self.device}")
                         else:
+                            logger.error(f"GMM model runtime error: {e}")
+                            logger.error(f"Input shapes: IDs={input_ids.shape}, Attention={attention_mask.shape}")
                             raise
 
                     start_logits = outputs["start_logits"]
@@ -240,12 +289,23 @@ def main():
                                 for expert_key, tensor in new_memory_state.items()
                             }
 
-                            # Validate memory bank storage
-                            if not eval_mode and len(self.memory_bank) > 1000:  # Prevent memory leaks
-                                logger.warning(f"Memory bank has grown to {len(self.memory_bank)} documents, consider cleanup")
+                            # Validate memory bank storage consistency
+                            if not eval_mode:
+                                for expert_key, expert_tensor in self.memory_bank[ex_id].items():
+                                    if expert_tensor.device != self.device:
+                                        logger.warning(f"Memory bank {ex_id} expert {expert_key} device mismatch: {expert_tensor.device} vs {self.device}")
+                                        self.memory_bank[ex_id][expert_key] = expert_tensor.to(self.device)
+
+                                # Monitor memory bank size
+                                if len(self.memory_bank) > 1000:  # Prevent memory leaks
+                                    logger.warning(f"Memory bank has grown to {len(self.memory_bank)} documents, consider cleanup")
+                                if len(self.memory_bank) % 100 == 0 and len(self.memory_bank) > 0:
+                                    logger.info(f"Memory bank size: {len(self.memory_bank)} documents")
 
                             # Store logits for this document (use first segment for simplicity)
-                            ex_idx = batch["example_ids"].tolist().index(ex_id)
+                            # Handle both tensor and list inputs for batch["example_ids"]
+                            example_ids_list = batch["example_ids"].tolist() if hasattr(batch["example_ids"], 'tolist') else batch["example_ids"]
+                            ex_idx = example_ids_list.index(ex_id)
                             per_doc_logits_start.setdefault(ex_id, []).append(start_logits[ex_idx])
                             per_doc_logits_end.setdefault(ex_id, []).append(end_logits[ex_idx])
                             per_doc_labels_start.setdefault(ex_id, []).append(start_positions[ex_idx])
