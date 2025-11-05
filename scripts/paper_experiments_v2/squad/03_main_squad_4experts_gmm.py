@@ -144,6 +144,102 @@ def main():
                 )
                 logger.info(f"✅ GMM model created with {config.num_memory_experts} experts")
 
+        def _process_document_batch_with_memory(self, time_step_batches, eval_mode=False):
+            """Override memory processing for GMM models."""
+            if hasattr(self.model, 'use_gmm_memory') and self.model.use_gmm_memory:
+                # GMM memory handling
+                self.model.train() if not eval_mode else self.model.eval()
+
+                # Initialize per-document memory bank
+                if not hasattr(self, "memory_bank"):
+                    self.memory_bank: dict[str, dict[str, torch.Tensor]] = {}
+
+                per_doc_logits_start = {}
+                per_doc_logits_end = {}
+                per_doc_labels_start = {}
+                per_doc_labels_end = {}
+
+                for time_step, batch in enumerate(time_step_batches):
+                    input_ids = batch["input_ids"].to(self.device)
+                    attention_mask = batch["attention_mask"].to(self.device)
+                    token_type_ids = batch["token_type_ids"].to(self.device)
+                    start_positions = batch["start_positions"].to(self.device)
+                    end_positions = batch["end_positions"].to(self.device)
+                    document_mask = batch["document_mask"].to(self.device)
+
+                    # Build GMM memory state dict per batch ordering
+                    memory_state_batch = {}
+                    for expert_idx in range(self.model.num_experts):
+                        expert_memories = []
+
+                        for ex_id, active in zip(batch["example_ids"], document_mask.tolist()):
+                            if not active:
+                                # New document: use initial memory
+                                initial_memory = self.model.get_initial_memory(1, self.device)
+                                expert_memory = initial_memory[f"expert_{expert_idx}"]
+                            else:
+                                # Existing document: get from memory bank
+                                prev = self.memory_bank.get(ex_id)
+                                if prev is None:
+                                    initial_memory = self.model.get_initial_memory(1, self.device)
+                                    expert_memory = initial_memory[f"expert_{expert_idx}"]
+                                else:
+                                    expert_memory = prev[f"expert_{expert_idx}"]
+                            expert_memories.append(expert_memory.squeeze(0))  # Remove batch dim
+
+                        # Stack expert memories across batch
+                        memory_state_batch[f"expert_{expert_idx}"] = torch.stack(expert_memories, dim=0)
+
+                    outputs = self.model(
+                        input_ids=input_ids,
+                        attention_mask=attention_mask,
+                        token_type_ids=token_type_ids,
+                        start_positions=start_positions,
+                        end_positions=end_positions,
+                        memory_state=memory_state_batch,
+                        mem_read_ids=self.mem_token_info.get("mem_read_ids") if self.mem_token_info else None,
+                        mem_write_ids=self.mem_token_info.get("mem_write_ids") if self.mem_token_info else None,
+                    )
+
+                    start_logits = outputs["start_logits"]
+                    end_logits = outputs["end_logits"]
+                    new_memory_state = outputs["new_memory_state"]
+
+                    # Collect logits and labels per document
+                    for ex_id, active in zip(batch["example_ids"], document_mask.tolist()):
+                        if active and ex_id in self.dataset.example_to_segments:
+                            # Update memory bank for next time step
+                            self.memory_bank[ex_id] = new_memory_state
+
+                            # Store logits for this document (use first segment for simplicity)
+                            ex_idx = batch["example_ids"].tolist().index(ex_id)
+                            per_doc_logits_start.setdefault(ex_id, []).append(start_logits[ex_idx])
+                            per_doc_logits_end.setdefault(ex_id, []).append(end_logits[ex_idx])
+                            per_doc_labels_start.setdefault(ex_id, []).append(start_positions[ex_idx])
+                            per_doc_labels_end.setdefault(ex_id, []).append(end_positions[ex_idx])
+
+                # Compute loss using collected logits and labels
+                total_loss = 0.0
+                total_examples = 0
+
+                for ex_id in per_doc_logits_start:
+                    ex_logits_start = torch.stack(per_doc_logits_start[ex_id])
+                    ex_logits_end = torch.stack(per_doc_logits_end[ex_id])
+                    ex_labels_start = torch.stack(per_doc_labels_start[ex_id])
+                    ex_labels_end = torch.stack(per_doc_labels_end[ex_id])
+
+                    loss_fct = torch.nn.CrossEntropyLoss()
+                    start_loss = loss_fct(ex_logits_start, ex_labels_start)
+                    end_loss = loss_fct(ex_logits_end, ex_labels_end)
+                    total_loss += (start_loss + end_loss) / 2
+                    total_examples += 1
+
+                avg_loss = total_loss / max(total_examples, 1)
+                return avg_loss
+            else:
+                # Non-GMM model: use parent's memory processing
+                return super()._process_document_batch_with_memory(time_step_batches, eval_mode)
+
     trainer = GMMTrainer(config)
 
     try:
