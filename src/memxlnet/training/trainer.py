@@ -1653,15 +1653,44 @@ class XLNetRecurrentTrainer:
                 example_ids = chunk.get("example_ids", [f"ex_{i}" for i in range(input_ids.size(0))])
 
                 memory_states = []
+                              # Check if this is a GMM model (multi-expert memory)
+                is_gmm_model = hasattr(self.model, 'use_gmm_memory') and self.model.use_gmm_memory
+
                 for ex_id, active in zip(example_ids, document_mask.tolist()):
                     if not active:
-                        memory_states.append(self.model.get_initial_memory(1, device=self.device)[0])
+                        if is_gmm_model:
+                            # GMM model: get expert_0 memory from dictionary
+                            initial_memory = self.model.get_initial_memory(1, device=self.device)
+                            memory_states.append(initial_memory["expert_0"])
+                        else:
+                            # Base model: use existing logic
+                            memory_states.append(self.model.get_initial_memory(1, device=self.device)[0])
                     else:
                         prev = eval_memory_bank.get(ex_id)
                         if prev is None:
-                            prev = self.model.get_initial_memory(1, device=self.device)[0]
+                            if is_gmm_model:
+                                # GMM model: get full expert dictionary for new document
+                                prev = self.model.get_initial_memory(1, device=self.device)
+                            else:
+                                # Base model: use existing logic
+                                prev = self.model.get_initial_memory(1, device=self.device)[0]
                         memory_states.append(prev)
-                memory_state_batch = torch.stack(memory_states, dim=0)
+
+                # Prepare memory state batch based on model type
+                if is_gmm_model:
+                    # GMM model: stack expert memories across batch
+                    memory_state_batch = {}
+                    for expert_idx in range(self.model.num_experts):
+                        expert_key = f"expert_{expert_idx}"
+                        expert_memories = []
+                        for memory_state in memory_states:
+                            # memory_state is a dictionary with expert keys
+                            expert_memories.append(memory_state[expert_key])
+                        # Stack memories for this expert across batch
+                        memory_state_batch[expert_key] = torch.stack(expert_memories, dim=0)
+                else:
+                    # Base MemXLNet model: original logic
+                    memory_state_batch = torch.stack(memory_states, dim=0)
 
                 outputs = self.model(
                     input_ids=input_ids,
@@ -1730,7 +1759,18 @@ class XLNetRecurrentTrainer:
 
                 for i, (ex_id, a) in enumerate(zip(example_ids, document_mask.tolist())):
                     if a:
-                        eval_memory_bank[ex_id] = new_memory_state[i].detach()
+                        # Check if this is a GMM model with expert dictionary structure
+                        if isinstance(new_memory_state, dict):
+                            # GMM model: extract individual memory for each expert
+                            expert_memory = {}
+                            for expert_key, expert_tensor in new_memory_state.items():
+                                # expert_tensor has shape (batch_size, memory_slots, hidden_dim)
+                                # Extract individual memory for this document
+                                expert_memory[expert_key] = expert_tensor[i].detach().to(self.device)
+                            eval_memory_bank[ex_id] = expert_memory
+                        else:
+                            # Base MemXLNet model: original logic
+                            eval_memory_bank[ex_id] = new_memory_state[i].detach()
 
             avg_loss = total_loss / num_chunks if num_chunks > 0 else 0.0
             predictions_data = {
