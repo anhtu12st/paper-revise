@@ -322,9 +322,14 @@ def main():
                     # Collect logits and labels per document
                     for ex_id, active in zip(batch["example_ids"], document_mask.tolist()):
                         if active:
+                            # Get batch index for this document to extract individual memory
+                            example_ids_list = batch["example_ids"].tolist() if hasattr(batch["example_ids"], 'tolist') else batch["example_ids"]
+                            ex_idx = example_ids_list.index(ex_id)
+
                             # Update memory bank for next time step (ensure on correct device)
+                            # Extract individual memory from batch tensor for this document (index ex_idx)
                             self.memory_bank[ex_id] = {
-                                expert_key: tensor.detach().to(self.device)  # Use detach() to avoid gradient storage issues
+                                expert_key: tensor[ex_idx].detach().to(self.device)  # Index ex_idx extracts individual memory
                                 for expert_key, tensor in new_memory_state.items()
                             }
 
@@ -345,9 +350,7 @@ def main():
                                     logger.info(f"Memory bank size: {len(self.memory_bank)} documents")
 
                             # Store logits for this document (use first segment for simplicity)
-                            # Handle both tensor and list inputs for batch["example_ids"]
-                            example_ids_list = batch["example_ids"].tolist() if hasattr(batch["example_ids"], 'tolist') else batch["example_ids"]
-                            ex_idx = example_ids_list.index(ex_id)
+                            # ex_idx is already calculated above
                             per_doc_logits_start.setdefault(ex_id, []).append(start_logits[ex_idx])
                             per_doc_logits_end.setdefault(ex_id, []).append(end_logits[ex_idx])
                             per_doc_labels_start.setdefault(ex_id, []).append(start_positions[ex_idx])
