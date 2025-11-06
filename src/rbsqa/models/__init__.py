@@ -84,7 +84,10 @@ class RBSModelOutput:
         if xlnet_memory.shape[0] != expected_memory_length:
             raise ValueError(f"Memory length mismatch. Expected {expected_memory_length}, got {xlnet_memory.shape[0]}")
 
-        return [xlnet_memory]
+        # XLNet expects memory tensors for each transformer layer (12 layers for base model)
+        # Duplicate the aggregated memory for all layers to maintain consistency
+        num_layers = 12  # xlnet-base-cased has 12 layers
+        return [xlnet_memory.clone() for _ in range(num_layers)]
 
     def to_tuple(self) -> Tuple:
         """Convert to tuple for compatibility with existing code."""
