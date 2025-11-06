@@ -147,6 +147,10 @@ class RBSTrainer(XLNetRecurrentTrainer):
                 logger.debug("Evaluation mode - skipping tensor shape validation")
 
             try:
+                # Prepare memory token IDs
+                mem_read_ids = self.mem_token_info.get("mem_read_ids") if self.mem_token_info else None
+                mem_write_ids = self.mem_token_info.get("mem_write_ids") if self.mem_token_info else None
+
                 outputs = self.model(
                     input_ids=input_ids,
                     attention_mask=attention_mask,
@@ -154,8 +158,8 @@ class RBSTrainer(XLNetRecurrentTrainer):
                     start_positions=start_positions,
                     end_positions=end_positions,
                     memory_state=memory_state_batch,
-                    mem_read_ids=self.mem_token_info.get("mem_read_ids") if self.mem_token_info else None,
-                    mem_write_ids=self.mem_token_info.get("mem_write_ids") if self.mem_token_info else None,
+                    mem_read_ids=mem_read_ids,
+                    mem_write_ids=mem_write_ids,
                 )
             except RuntimeError as e:
                 if "Expected all tensors to be on the same device" in str(e):
