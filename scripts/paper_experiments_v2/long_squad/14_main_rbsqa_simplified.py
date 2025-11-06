@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-Standard SQuAD v2 - RBSQA Main (Simplified with RBSTrainer)
-==========================================================
+Long SQuAD v2 - RBSQA Main (Simplified with RBSTrainer)
+====================================================
 
-Dataset: squad_v2 (standard)
-Max segments: 2
+Dataset: huutuan/long_squad_v2 (long documents, 6-12 segments)
+Progressive segments: [2, 4, 6]
 Memory: RBSQA with belief state tracker and halting policy
 
-Purpose: Main result on standard benchmark with RBSQA memory architecture.
+Purpose: Main result on long documents with RBSQA memory architecture.
 This script uses the dedicated RBSTrainer for cleaner, reusable code.
 
-Output: outputs/paper_v2_squad_rbsqa_main/
+Output: outputs/paper_v2_long_rbsqa_main/
 """
 
 import logging
@@ -36,19 +36,19 @@ def create_config():
         model_name="xlnet-base-cased",
         max_seq_length=384,
         doc_stride=64,
-        dataset_name="squad_v2",
+        dataset_name="huutuan/long_squad_v2",
         train_split="train",
         eval_split="validation",
         cache_dir="./.cache",
-        max_train_samples=1000,
-        max_eval_samples=200,
-        use_lazy_loading=True,
+        max_train_samples=None,
+        max_eval_samples=None,
+        use_lazy_loading=False,
         # Chunked dataset settings (FAST: 2-5 min vs 30-60 min preprocessing)
         use_chunked_dataset=True,
-        chunked_dataset_dir="./preprocessed_data/squad_v2",
+        chunked_dataset_dir="./preprocessed_data/huutuan_long_squad_v2",
         chunked_load_mode="streaming",  # Memory-efficient streaming
-        progressive_segments=[2],
-        max_n_segs=2,
+        progressive_segments=[2, 4, 6],
+        max_n_segs=6,
         # Memory configuration
         memory_num_tokens=16,  # RBSQA memory slots
         memory_update="gated",
@@ -57,7 +57,7 @@ def create_config():
         use_gmm_memory=True,  # RBS requires GMM memory
         # RBS-specific parameters
         use_belief_state=True,
-        belief_state_threshold=0.9,  # Halting decision threshold
+        belief_state_threshold=0.85,  # Lower threshold for more thorough reasoning on long docs
         enable_re_scoring=True,
         confidence_calibration=True,
         re_scoring_method="context_weighted",
@@ -78,8 +78,8 @@ def create_config():
         use_value_baseline=True,
         value_weight=0.05,  # Halting policy weight equivalent
         # Global softmax and training settings
-        use_global_softmax=False,
-        num_epochs=5,
+        use_global_softmax=True,
+        num_epochs=3,
         train_batch_size=8,
         eval_batch_size=16,
         learning_rate=3e-5,
@@ -87,19 +87,19 @@ def create_config():
         warmup_ratio=0.1,
         max_grad_norm=1.0,
         gradient_accumulation_steps=1,
-        eval_steps=50000,  # TODO: change back to 5000
+        eval_steps=6000,
         save_steps=10000,
         logging_steps=500,
-        output_dir="./outputs/paper_v2_squad_rbsqa_main",
-        run_name="paper-v2-squad-rbsqa-main",
+        output_dir="./outputs/paper_v2_long_rbsqa_main",
+        run_name="paper-v2-long-rbsqa-main",
         save_total_limit=3,
         no_answer_threshold=1.5,
         use_any_positive_logic=True,
         device=device,
         fp16=has_cuda,
-        # ✅ Enable global softmax immediately (consistent with original)
+        # ✅ Enable global softmax after 1 epoch (consistent with original for long docs)
         warmup_freeze_base_epochs=0,
-        warmup_disable_global_softmax_epochs=0,
+        warmup_disable_global_softmax_epochs=1,
         warmup_disable_any_positive_epochs=0,
         push_to_hub_on_save=False,
     )
@@ -107,16 +107,17 @@ def create_config():
 
 def main():
     print("\n" + "=" * 80)
-    print("📊 EXPERIMENT RBSQA: SQUAD V2 - MAIN (SIMPLIFIED WITH RBS TRAINER)")
+    print("📊 EXPERIMENT RBSQA: LONG SQUAD V2 - MAIN (SIMPLIFIED WITH RBS TRAINER)")
     print("=" * 80 + "\n")
     print("🔧 Configuration details:")
     print("   ✅ Using dedicated RBSTrainer for clean, reusable code")
     print("   ✅ RBS extends GMM with belief state tracking and halting policy")
     print("   ✅ Memory: 4 independent expert memories with learned routing")
+    print("   ✅ Progressive segments: [2, 4, 6] for long documents")
     print("   ✅ All RBS-specific logic handled by RBSTrainer")
     print()
-    print("Expected outcome: F1 > 0% (should achieve ~65-80% F1)")
-    print("                  Adaptive reasoning should improve performance")
+    print("Expected outcome: F1 > 0% (should achieve ~60-75% F1 on long documents)")
+    print("                  Adaptive reasoning should improve long-context performance")
     print()
 
     config = create_config()
@@ -131,6 +132,8 @@ def main():
     print(f"   - Memory slots: {config.memory_num_tokens}")
     print(f"   - RL weight: {config.rl_weight}")
     print(f"   - Value weight: {config.value_weight}")
+    print(f"   - Progressive segments: {config.progressive_segments}")
+    print(f"   - Max segments: {config.max_n_segs}")
     print()
 
     # Create RBSQA trainer (handles all RBS-specific logic internally)
@@ -165,10 +168,10 @@ def main():
             # Success criteria
             if metrics.get("f1", 0.0) > 0:
                 print("\n✅ SUCCESS: RBSQA model is learning (F1 > 0%)")
-                if metrics.get("f1", 0.0) >= 65:
-                    print("🎉 EXCELLENT: RBSQA achieved strong performance (F1 >= 65%)")
-                if metrics.get("f1", 0.0) >= 75:
-                    print("🏆 OUTSTANDING: RBSQA belief state tracking showing benefits (F1 >= 75%)")
+                if metrics.get("f1", 0.0) >= 60:
+                    print("🎉 EXCELLENT: RBSQA achieved strong performance on long documents (F1 >= 60%)")
+                if metrics.get("f1", 0.0) >= 70:
+                    print("🏆 OUTSTANDING: RBSQA belief state tracking showing benefits on long context (F1 >= 70%)")
             else:
                 print("\n⚠️  WARNING: F1 still 0% - RBSQA reasoning investigation needed")
 
