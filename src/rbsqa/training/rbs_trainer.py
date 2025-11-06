@@ -182,7 +182,8 @@ class RBSTrainer(XLNetRecurrentTrainer):
 
             # Collect logits and labels per document
             self._collect_document_outputs(batch, document_mask, start_logits, end_logits,
-                                         new_memory_state, per_doc_logits_start, per_doc_logits_end,
+                                         new_memory_state, start_positions, end_positions,
+                                         per_doc_logits_start, per_doc_logits_end,
                                          per_doc_labels_start, per_doc_labels_end, eval_mode)
 
         # Compute loss using collected logits and labels
@@ -329,6 +330,7 @@ class RBSTrainer(XLNetRecurrentTrainer):
     def _collect_document_outputs(self, batch: Dict, document_mask: torch.Tensor,
                                 start_logits: torch.Tensor, end_logits: torch.Tensor,
                                 new_memory_state: Dict[str, torch.Tensor],
+                                start_positions: torch.Tensor, end_positions: torch.Tensor,
                                 per_doc_logits_start: Dict, per_doc_logits_end: Dict,
                                 per_doc_labels_start: Dict, per_doc_labels_end: Dict,
                                 eval_mode: bool) -> None:
