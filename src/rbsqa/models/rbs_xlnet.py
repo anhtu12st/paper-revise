@@ -349,6 +349,10 @@ class RBSXLNetForQA(nn.Module):
         mem_read_ids = list(range(1, self.config.memory_num_tokens + 1))
         mem_write_ids = list(range(100, 100 + self.config.memory_num_tokens))
 
+        # Filter out memory token IDs from kwargs to avoid "multiple values" error
+        filtered_kwargs = {k: v for k, v in kwargs.items()
+                          if k not in ['mem_read_ids', 'mem_write_ids']}
+
         gmm_outputs = self.gmm_backbone(
             input_ids=input_ids,
             attention_mask=attention_mask,
@@ -356,7 +360,7 @@ class RBSXLNetForQA(nn.Module):
             mem_read_ids=mem_read_ids,
             mem_write_ids=mem_write_ids,
             return_routing_info=True,
-            **kwargs
+            **filtered_kwargs
         )
 
         # Create aggregated memory tensor for output
