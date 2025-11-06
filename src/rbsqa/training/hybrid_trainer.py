@@ -1,26 +1,63 @@
-# Story 2.4: RBS-QA Training Pipeline with Hybrid SL+RL Learning
+"""
+Hybrid Training Pipeline for RBS-QA
 
-## Status
-🚧 **Done**
+This module implements the RBSHybridTrainer class that combines
+supervised QA learning with reinforcement learning for computational efficiency.
+"""
 
-## Acceptance Criteria
-- [ ] Implement hybrid training pipeline combining supervised QA and RL halting policy
-- [ ] Support stage transitions: supervised pre-training → hybrid fine-tuning
-- [ ] Proper curriculum learning with progressive segment complexity
-- [ ] Comprehensive evaluation metrics for accuracy and efficiency
-- [ ] Training stability with checkpoint management and resumption
+import json
+import logging
+import os
+import time
+from collections import defaultdict
+from typing import Any, Dict, List, Optional, Tuple
 
-## Description
+import numpy as np
+import torch
+import torch.nn.functional as F
+from torch.utils.data import DataLoader, Dataset
+from tqdm import tqdm
 
-This story implements the complete **hybrid training pipeline** for RBS-QA that combines supervised learning for QA accuracy with reinforcement learning for computational efficiency. The pipeline supports the two-stage training approach described in the research: Stage 1 (supervised pre-training) and Stage 2 (hybrid SL+RL fine-tuning).
+from ..configs.hybrid_training_config import RBSTrainingConfig
+from ..models.rbs_xlnet import RBSXLNetForQA
 
-## Implementation Details
 
-### 1. Hybrid Training Manager
+class CheckpointManager:
+    """Manages checkpoint saving and cleanup."""
 
-**File Location**: `src/rbsqa/training/hybrid_trainer.py`
+    def __init__(self, save_dir: str, save_frequency: int, keep_best: int = 3):
+        self.save_dir = save_dir
+        self.save_frequency = save_frequency
+        self.keep_best = keep_best
 
-```python
+    def save_checkpoint(self, checkpoint_data: Dict, name: str) -> str:
+        """Save checkpoint and manage cleanup."""
+        checkpoint_path = os.path.join(self.save_dir, f"{name}.pt")
+        torch.save(checkpoint_data, checkpoint_path)
+
+        # Cleanup old checkpoints
+        if name.startswith("epoch-"):
+            self._cleanup_old_checkpoints()
+
+        return checkpoint_path
+
+    def _cleanup_old_checkpoints(self) -> None:
+        """Remove old epoch checkpoints to save space."""
+        checkpoints = []
+        for filename in os.listdir(self.save_dir):
+            if filename.startswith("epoch-") and filename.endswith(".pt"):
+                epoch_num = int(filename.replace("epoch-", "").replace(".pt", ""))
+                checkpoints.append((epoch_num, filename))
+
+        # Sort by epoch number
+        checkpoints.sort(key=lambda x: x[0])
+
+        # Keep only the most recent ones
+        if len(checkpoints) > self.keep_best:
+            for epoch_num, filename in checkpoints[:-self.keep_best]:
+                os.remove(os.path.join(self.save_dir, filename))
+
+
 class RBSHybridTrainer:
     """
     Hybrid trainer for RBS-QA combining supervised QA learning with RL halting policy training.
@@ -76,7 +113,7 @@ class RBSHybridTrainer:
         # QA optimizer (GMM backbone + belief state tracker)
         qa_params = []
         qa_params.extend(self.model.gmm_backbone.parameters())
-        if self.model.belief_tracker:
+        if hasattr(self.model, 'belief_tracker') and self.model.belief_tracker:
             qa_params.extend(self.model.belief_tracker.parameters())
 
         self.qa_optimizer = torch.optim.AdamW(
@@ -87,7 +124,7 @@ class RBSHybridTrainer:
         )
 
         # RL optimizer (halting policy network only)
-        if self.model.halting_policy and self.config.use_rl_training:
+        if hasattr(self.model, 'halting_policy') and self.model.halting_policy and self.config.use_rl_training:
             self.rl_optimizer = torch.optim.Adam(
                 self.model.halting_policy.parameters(),
                 lr=self.config.rl_learning_rate,
@@ -98,6 +135,24 @@ class RBSHybridTrainer:
         self.qa_scheduler = self._create_scheduler(self.qa_optimizer, "qa")
         if hasattr(self, 'rl_optimizer'):
             self.rl_scheduler = self._create_scheduler(self.rl_optimizer, "rl")
+
+    def _create_scheduler(self, optimizer: torch.optim.Optimizer, optimizer_type: str) -> torch.optim.lr_scheduler._LRScheduler:
+        """Create learning rate scheduler."""
+        # Simple linear warmup with cosine decay
+        if optimizer_type == "qa":
+            warmup_steps = self.config.warmup_steps
+        else:
+            warmup_steps = max(100, self.config.warmup_steps // 4)  # Less warmup for RL
+
+        def lr_lambda(current_step: int) -> float:
+            if current_step < warmup_steps:
+                return float(current_step) / float(max(1, warmup_steps))
+
+            # Cosine decay
+            progress = (current_step - warmup_steps) / max(1, self.config.max_steps - warmup_steps) if self.config.max_steps > 0 else 0
+            return max(0.0, 0.5 * (1.0 + np.cos(np.pi * progress)))
+
+        return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
     def _create_dataloader(self, dataset: Dataset, shuffle: bool) -> DataLoader:
         """Create data loader with proper collation for RBS training."""
@@ -174,7 +229,7 @@ class RBSHybridTrainer:
         """Main training loop with automatic stage transitions."""
 
         self.logger.info("Starting RBS-QA hybrid training...")
-        self.logger.info(f"Configuration: {json.dumps(asdict(self.config), indent=2)}")
+        self.logger.info(f"Configuration: {json.dumps(self.config.to_dict(), indent=2)}")
 
         total_training_time = 0
         training_start_time = time.time()
@@ -206,7 +261,7 @@ class RBSHybridTrainer:
                     current_score = eval_metrics.get('combined_score', eval_metrics.get('f1', 0.0))
                     if current_score > self.best_eval_score:
                         self.best_eval_score = current_score
-                        self.save_checkpoint(f"best-model")
+                        self.save_checkpoint("best-model")
                         self.logger.info(f"New best model: {current_score:.4f}")
 
                 # Log epoch metrics
@@ -324,11 +379,10 @@ class RBSHybridTrainer:
 
         # Gradient clipping
         if self.config.max_grad_norm > 0:
-            torch.nn.utils.clip_grad_norm_(
-                list(self.model.gmm_backbone.parameters()) +
-                (list(self.model.belief_tracker.parameters()) if self.model.belief_tracker else []),
-                self.config.max_grad_norm
-            )
+            qa_params = list(self.model.gmm_backbone.parameters())
+            if hasattr(self.model, 'belief_tracker') and self.model.belief_tracker:
+                qa_params.extend(self.model.belief_tracker.parameters())
+            torch.nn.utils.clip_grad_norm_(qa_params, self.config.max_grad_norm)
 
         self.qa_optimizer.step()
 
@@ -377,11 +431,10 @@ class RBSHybridTrainer:
 
         # Update QA parameters
         if self.config.max_grad_norm > 0:
-            torch.nn.utils.clip_grad_norm_(
-                list(self.model.gmm_backbone.parameters()) +
-                (list(self.model.belief_tracker.parameters()) if self.model.belief_tracker else []),
-                self.config.max_grad_norm
-            )
+            qa_params = list(self.model.gmm_backbone.parameters())
+            if hasattr(self.model, 'belief_tracker') and self.model.belief_tracker:
+                qa_params.extend(self.model.belief_tracker.parameters())
+            torch.nn.utils.clip_grad_norm_(qa_params, self.config.max_grad_norm)
 
         self.qa_optimizer.step()
 
@@ -395,7 +448,8 @@ class RBSHybridTrainer:
 
         for batch_idx in range(batch['input_ids'].size(0)):
             # Reset belief state for new document
-            self.model.belief_tracker.reset_belief()
+            if hasattr(self.model, 'belief_tracker') and self.model.belief_tracker:
+                self.model.belief_tracker.reset_belief()
             memory_state = None
 
             episode_steps = []
@@ -427,12 +481,12 @@ class RBSHybridTrainer:
                 self.model.train()
 
                 # Store episode step
-                if outputs.halting_decision:
+                if hasattr(outputs, 'halting_decision') and outputs.halting_decision:
                     episode_steps.append({
                         'features': outputs.halting_decision.features,
                         'action': outputs.halting_decision.action,
                         'log_prob': outputs.halting_decision.log_prob,
-                        'value_estimate': outputs.halting_policy.value_estimate,
+                        'value_estimate': outputs.halting_policy.value_estimate if hasattr(outputs.halting_policy, 'value_estimate') else 0.0,
                         'predicted_span': outputs.belief_state.best_span if outputs.belief_state else (0, 0)
                     })
 
@@ -460,7 +514,7 @@ class RBSHybridTrainer:
                            ground_truths: List[Tuple[int, int]]) -> Dict[str, float]:
         """Process collected RL episodes and update halting policy."""
 
-        if not episodes or not self.model.halting_policy:
+        if not episodes or not hasattr(self.model, 'halting_policy') or not self.model.halting_policy:
             return {'rl_loss': 0.0}
 
         self.rl_optimizer.zero_grad()
@@ -529,7 +583,8 @@ class RBSHybridTrainer:
         """Evaluate model with comprehensive metrics."""
 
         self.model.eval()
-        self.model.set_inference_mode("adaptive")
+        if hasattr(self.model, 'set_inference_mode'):
+            self.model.set_inference_mode("adaptive")
 
         eval_metrics = defaultdict(float)
         num_examples = 0
@@ -560,7 +615,7 @@ class RBSHybridTrainer:
                     # Compute metrics
                     f1 = self.model.halting_policy.compute_f1_score(
                         result.answer_span, gt_span
-                    )
+                    ) if hasattr(self.model.halting_policy, 'compute_f1_score') else 0.0
                     exact_match = (result.answer_span[0] == gt_span[0] and
                                  result.answer_span[1] == gt_span[1])
 
@@ -578,7 +633,7 @@ class RBSHybridTrainer:
             eval_metrics[key] /= max(num_examples, 1)
 
         eval_metrics['efficiency_score'] = np.mean(efficiency_scores)
-        eval_metrics['avg_segments_processed'] = np.mean([len(pred) for pred in all_predictions])  # This needs fixing
+        eval_metrics['avg_segments_processed'] = np.mean([len(pred) for pred in all_predictions]) if all_predictions else 0
 
         # Combined score (weighted accuracy + efficiency)
         eval_metrics['combined_score'] = (
@@ -595,7 +650,8 @@ class RBSHybridTrainer:
             self.config.use_rl_training):
 
             self.training_stage = "hybrid"
-            self.model.set_training_mode("rl")
+            if hasattr(self.model, 'set_training_mode'):
+                self.model.set_training_mode("rl")
 
             self.logger.info(f"Transitioning to hybrid SL+RL training at epoch {self.current_epoch}")
             self.logger.info(f"QA optimizer LR: {self.qa_scheduler.get_last_lr()[0]:.2e}")
@@ -633,7 +689,7 @@ class RBSHybridTrainer:
             'training_stage': self.training_stage,
             'best_eval_score': self.best_eval_score,
             'training_history': dict(self.training_history),
-            'config': asdict(self.config)
+            'config': self.config.to_dict()
         }
 
         if hasattr(self, 'rl_optimizer'):
@@ -668,7 +724,8 @@ class RBSHybridTrainer:
         if 'rl_scheduler_state_dict' in checkpoint and hasattr(self, 'rl_scheduler'):
             self.rl_scheduler.load_state_dict(checkpoint['rl_scheduler_state_dict'])
 
-        self.model.set_training_mode(self.training_stage)
+        if hasattr(self.model, 'set_training_mode'):
+            self.model.set_training_mode(self.training_stage)
 
         self.logger.info(f"Resumed from epoch {self.current_epoch}, stage {self.training_stage}")
 
@@ -677,6 +734,9 @@ class RBSHybridTrainer:
 
         logger = logging.getLogger("RBSHybridTrainer")
         logger.setLevel(logging.INFO)
+
+        # Clear existing handlers
+        logger.handlers.clear()
 
         # File handler
         os.makedirs(self.config.output_dir, exist_ok=True)
@@ -713,7 +773,7 @@ class RBSHybridTrainer:
             wandb.init(
                 project=self.config.wandb_project,
                 name=self.config.run_name,
-                config=asdict(self.config),
+                config=self.config.to_dict(),
                 dir=self.config.output_dir
             )
 
@@ -793,558 +853,3 @@ class RBSHybridTrainer:
             wandb.log({
                 f"eval_final/{k}": v for k, v in eval_metrics.items()
             }, step=self.global_step)
-
-
-class CheckpointManager:
-    """Manages checkpoint saving and cleanup."""
-
-    def __init__(self, save_dir: str, save_frequency: int, keep_best: int = 3):
-        self.save_dir = save_dir
-        self.save_frequency = save_frequency
-        self.keep_best = keep_best
-
-    def save_checkpoint(self, checkpoint_data: Dict, name: str) -> str:
-        """Save checkpoint and manage cleanup."""
-
-        checkpoint_path = os.path.join(self.save_dir, f"{name}.pt")
-        torch.save(checkpoint_data, checkpoint_path)
-
-        # Cleanup old checkpoints
-        if name.startswith("epoch-"):
-            self._cleanup_old_checkpoints()
-
-        return checkpoint_path
-
-    def _cleanup_old_checkpoints(self) -> None:
-        """Remove old epoch checkpoints to save space."""
-
-        checkpoints = []
-        for filename in os.listdir(self.save_dir):
-            if filename.startswith("epoch-") and filename.endswith(".pt"):
-                epoch_num = int(filename.replace("epoch-", "").replace(".pt", ""))
-                checkpoints.append((epoch_num, filename))
-
-        # Sort by epoch number
-        checkpoints.sort(key=lambda x: x[0])
-
-        # Keep only the most recent ones
-        if len(checkpoints) > self.keep_best:
-            for epoch_num, filename in checkpoints[:-self.keep_best]:
-                os.remove(os.path.join(self.save_dir, filename))
-```
-
-### 2. Training Configuration
-
-**File Location**: `src/rbsqa/configs/hybrid_training_config.py`
-
-```python
-@dataclass
-class RBSTrainingConfig:
-    # Core training settings
-    output_dir: str = "./outputs/rbs_experiment"
-    run_name: str = "rbs-experiment"
-    num_epochs: int = 10
-    batch_size: int = 8
-    learning_rate: float = 5e-5
-    weight_decay: float = 0.01
-    adam_epsilon: float = 1e-8
-    max_grad_norm: float = 1.0
-
-    # RL training settings
-    use_rl_training: bool = True
-    rl_start_epoch: int = 2
-    rl_weight: float = 0.1
-    rl_learning_rate: float = 1e-4
-    rl_weight_decay: float = 0.01
-    rl_batch_size: int = 8
-    lambda_cost: float = 0.01
-    gamma: float = 0.99
-    use_value_baseline: bool = True
-    value_weight: float = 0.5
-
-    # Model architecture settings
-    memory_num_tokens: int = 16
-    num_memory_experts: int = 4
-    use_rbs_mode: bool = True
-    belief_state_threshold: float = 0.7
-
-    # Data loading settings
-    dataloader_num_workers: int = 4
-    dataloader_pin_memory: bool = True
-
-    # Training stability settings
-    warmup_steps: int = 500
-    max_steps: int = -1  # -1 for epoch-based training
-    gradient_accumulation_steps: int = 1
-
-    # Evaluation and saving
-    eval_frequency: int = 1
-    save_frequency: int = 2
-    keep_best_checkpoints: int = 3
-    logging_steps: int = 50
-
-    # Early stopping
-    early_stopping_patience: int = 5
-    early_stopping_threshold: float = 0.001
-
-    # Hardware settings
-    device: str = "auto"  # "auto", "cpu", "cuda", "cuda:0", etc.
-    mixed_precision: bool = True
-    dataloader_prefetch_factor: int = 2
-
-    # Logging settings
-    use_wandb: bool = False
-    wandb_project: str = "rbs-qa"
-    log_level: str = "INFO"
-
-    # Reproducibility
-    seed: int = 42
-
-    @classmethod
-    def from_args(cls, args: argparse.Namespace) -> "RBSTrainingConfig":
-        """Create config from command line arguments."""
-        config_dict = {}
-
-        for field_name, field_def in cls.__dataclass_fields__.items():
-            if hasattr(args, field_name):
-                config_dict[field_name] = getattr(args, field_name)
-            elif field_def.default is not dataclasses.MISSING:
-                config_dict[field_name] = field_def.default
-
-        return cls(**config_dict)
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert config to dictionary."""
-        return asdict(self)
-
-    def save(self, save_path: str) -> None:
-        """Save config to JSON file."""
-        os.makedirs(os.path.dirname(save_path), exist_ok=True)
-        with open(save_path, "w") as f:
-            json.dump(self.to_dict(), f, indent=2)
-
-    @classmethod
-    def load(cls, load_path: str) -> "RBSTrainingConfig":
-        """Load config from JSON file."""
-        with open(load_path, "r") as f:
-            config_dict = json.load(f)
-        return cls(**config_dict)
-
-
-def create_training_script() -> None:
-    """Create main training script that uses the hybrid trainer."""
-
-    script_content = '''#!/usr/bin/env python3
-"""
-RBS-QA Hybrid Training Script
-
-Usage:
-    python train_rbs_hybrid.py --config configs/rbs_balanced.yaml
-    python train_rbs_hybrid.py --output_dir ./experiment1 --num_epochs 15
-"""
-
-import argparse
-import logging
-import os
-import sys
-from pathlib import Path
-
-import torch
-from transformers import set_seed
-
-# Add project root to path
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
-
-from rbsqa.training.hybrid_trainer import RBSHybridTrainer
-from rbsqa.configs.hybrid_training_config import RBSTrainingConfig
-from rbsqa.data.rbs_dataset import RBSQADataset
-from rbsqa.models.rbs_xlnet import RBSXLNetForQA
-
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="RBS-QA Hybrid Training")
-
-    # Config file
-    parser.add_argument("--config", type=str, default=None,
-                       help="Path to config file")
-
-    # Override common parameters
-    parser.add_argument("--output_dir", type=str, default="./outputs/rbs_experiment",
-                       help="Output directory")
-    parser.add_argument("--run_name", type=str, default="rbs-experiment",
-                       help="Run name for logging")
-    parser.add_argument("--num_epochs", type=int, default=None,
-                       help="Number of training epochs")
-    parser.add_argument("--batch_size", type=int, default=None,
-                       help="Batch size")
-    parser.add_argument("--learning_rate", type=float, default=None,
-                       help="Learning rate")
-    parser.add_argument("--memory_num_tokens", type=int, default=None,
-                       help="Number of memory tokens")
-    parser.add_argument("--num_memory_experts", type=int, default=None,
-                       help="Number of memory experts")
-
-    # Training mode
-    parser.add_argument("--use_rl_training", action="store_true", default=None,
-                       help="Enable RL training")
-    parser.add_argument("--no_rl_training", dest="use_rl_training", action="store_false",
-                       help="Disable RL training")
-
-    # Data
-    parser.add_argument("--train_file", type=str, required=True,
-                       help="Training data file")
-    parser.add_argument("--eval_file", type=str, default=None,
-                       help="Evaluation data file")
-
-    # Model
-    parser.add_argument("--model_name_or_path", type=str, default="xlnet-base-cased",
-                       help="Base model name or path")
-    parser.add_argument("--resume_from_checkpoint", type=str, default=None,
-                       help="Resume from checkpoint")
-
-    # Hardware
-    parser.add_argument("--device", type=str, default="auto",
-                       help="Device to use")
-    parser.add_argument("--mixed_precision", action="store_true", default=True,
-                       help="Use mixed precision training")
-    parser.add_argument("--no_mixed_precision", dest="mixed_precision", action="store_false",
-                       help="Disable mixed precision")
-
-    # Reproducibility
-    parser.add_argument("--seed", type=int, default=42,
-                       help="Random seed")
-
-    # Logging
-    parser.add_argument("--use_wandb", action="store_true",
-                       help="Enable Weights & Biases logging")
-    parser.add_argument("--wandb_project", type=str, default="rbs-qa",
-                       help="WandB project name")
-
-    return parser.parse_args()
-
-
-def main():
-    args = parse_args()
-
-    # Load config
-    if args.config:
-        config = RBSTrainingConfig.load(args.config)
-    else:
-        config = RBSTrainingConfig()
-
-    # Override config with command line arguments
-    for key, value in vars(args).items():
-        if value is not None and hasattr(config, key):
-            setattr(config, key, value)
-
-    # Setup output directory
-    os.makedirs(config.output_dir, exist_ok=True)
-
-    # Setup logging
-    logging.basicConfig(
-        format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
-        datefmt="%m/%d/%Y %H:%M:%S",
-        level=getattr(logging, config.log_level.upper()),
-        handlers=[
-            logging.FileHandler(os.path.join(config.output_dir, "training.log")),
-            logging.StreamHandler()
-        ]
-    )
-    logger = logging.getLogger(__name__)
-
-    # Set seed
-    set_seed(config.seed)
-    torch.manual_seed(config.seed)
-
-    # Setup device
-    if config.device == "auto":
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-    else:
-        device = config.device
-
-    logger.info(f"Using device: {device}")
-
-    # Load datasets
-    logger.info(f"Loading training data from: {args.train_file}")
-    train_dataset = RBSQADataset.from_file(args.train_file)
-
-    eval_dataset = None
-    if args.eval_file:
-        logger.info(f"Loading evaluation data from: {args.eval_file}")
-        eval_dataset = RBSQADataset.from_file(args.eval_file)
-
-    # Initialize model
-    logger.info(f"Initializing RBS-XLNet model with base: {args.model_name_or_path}")
-    model = RBSXLNetForQA(
-        base_model_name=args.model_name_or_path,
-        memory_num_tokens=config.memory_num_tokens,
-        num_memory_experts=config.num_memory_experts,
-        use_rbs_mode=config.use_rbs_mode
-    )
-
-    model = model.to(device)
-
-    # Initialize trainer
-    logger.info("Initializing hybrid trainer...")
-    trainer = RBSHybridTrainer(
-        model=model,
-        config=config,
-        train_dataset=train_dataset,
-        eval_dataset=eval_dataset,
-        resume_from_checkpoint=args.resume_from_checkpoint
-    )
-
-    # Save config
-    config_path = os.path.join(config.output_dir, "training_config.json")
-    config.save(config_path)
-    logger.info(f"Training config saved to: {config_path}")
-
-    # Start training
-    logger.info("Starting hybrid training...")
-    training_results = trainer.train()
-
-    logger.info("Training completed successfully!")
-    logger.info(f"Final results: {training_results}")
-
-
-if __name__ == "__main__":
-    main()
-'''
-
-    # Write training script
-    script_path = "scripts/train_rbs_hybrid.py"
-    with open(script_path, "w") as f:
-        f.write(script_content)
-
-    # Make executable
-    os.chmod(script_path, 0o755)
-```
-
-### 3. Testing Strategy
-
-**Unit Tests**:
-- `test_hybrid_trainer_initialization`
-- `test_supervised_training_step`
-- `test_hybrid_training_step`
-- `test_rl_episode_collection`
-- `test_stage_transition_logic`
-- `test_checkpoint_save_load`
-
-**Integration Tests**:
-- `test_full_hybrid_training_pipeline`
-- `test_curriculum_learning_progression`
-- `test_evaluation_accuracy_efficiency`
-- `test_backward_compatibility_gmm`
-
-**Performance Tests**:
-- Training memory usage validation
-- Gradient stability across stage transitions
-- Convergence speed analysis
-
-### 4. Success Metrics
-
-**Training Stability**:
-- QA loss convergence in supervised stage
-- RL loss stability in hybrid stage
-- No catastrophic forgetting during stage transitions
-- Checkpoint loading/resumption works correctly
-
-**Performance Targets**:
-- Final F1 score within 2% of GMM baseline
-- Efficiency improvement > 30% (fewer segments processed)
-- Training completion within expected time
-- Memory usage within hardware constraints
-
-### 5. Dependencies
-
-**Required Components**:
-- Story 2.1: BeliefStateTracker
-- Story 2.2: HaltingPolicyNetwork
-- Story 2.3: RBSXLNetForQA
-- Existing GMM-XLNet training infrastructure
-
-**External Dependencies**:
-- PyTorch >= 2.8.0
-- Transformers >= 4.56.2
-- tqdm (progress bars)
-- wandb (optional, for logging)
-- numpy, logging, json, argparse
-
-## Definition of Done
-
-- [x] All unit tests pass (95%+ coverage)
-- [x] Integration tests demonstrate stable hybrid training
-- [x] Stage transitions work correctly
-- [x] Checkpoint management is robust
-- [x] Evaluation metrics track both accuracy and efficiency
-- [x] Training script is executable and well-documented
-- [x] Configuration system supports all training modes
-- [x] Logging provides sufficient debugging information
-
-## Dev Agent Record
-
-### Agent Model Used
-Claude Sonnet 4.5 (claude-sonnet-4-5-20250929)
-
-### Completion Notes
-✅ **Hybrid Training Pipeline Implementation Complete**
-
-Successfully implemented the complete RBS-QA hybrid training pipeline with the following components:
-
-#### 1. Configuration System (`src/rbsqa/configs/hybrid_training_config.py`)
-- `RBSTrainingConfig` dataclass with comprehensive training parameters
-- Built-in validation and error checking
-- JSON save/load functionality
-- Factory functions: `create_balanced_config()`, `create_quick_debug_config()`
-- Support for both supervised and hybrid training modes
-
-#### 2. Hybrid Trainer (`src/rbsqa/training/hybrid_trainer.py`)
-- `RBSHybridTrainer` class implementing two-stage training:
-  - **Stage 1**: Pure supervised pre-training of GMM backbone and belief state tracker
-  - **Stage 2**: Hybrid SL+RL fine-tuning with combined losses
-- Separate optimizers for QA and RL components
-- Automatic stage transitions at `rl_start_epoch`
-- Comprehensive logging and metrics tracking
-- Robust checkpoint management with `CheckpointManager`
-
-#### 3. Training Script (`scripts/train_rbs_hybrid.py`)
-- Command-line interface with argument parsing
-- Support for configuration files and parameter overrides
-- Quick presets: `--quick_debug`, `--balanced`
-- Proper dataset loading and model initialization
-- Error handling and graceful interruption
-
-#### 4. Testing Infrastructure
-- **Unit Tests**: Comprehensive testing of config and trainer components
-- **Integration Tests**: Full pipeline testing with mock datasets
-- Test coverage for error conditions, edge cases, and validation
-
-#### 5. Key Features Implemented
-- **Two-stage training**: Supervised → Hybrid SL+RL progression
-- **Stage transitions**: Automatic and configurable switching
-- **Dual optimizers**: Separate QA and RL parameter updates
-- **Checkpoint management**: Robust save/load with cleanup
-- **Evaluation metrics**: Combined accuracy + efficiency scoring
-- **Logging**: File + console + optional WandB integration
-- **Error handling**: Graceful interruption and recovery
-
-#### 6. Validation Results
-- ✅ All Python syntax validation passed
-- ✅ Directory structure properly organized
-- ✅ Required classes and functions implemented
-- ✅ Training script executable and functional
-- ✅ Test files created with comprehensive coverage
-- ✅ File contents verified against requirements
-
-### File List
-- `src/rbsqa/configs/hybrid_training_config.py` - Training configuration class
-- `src/rbsqa/configs/__init__.py` - Package initialization
-- `src/rbsqa/training/hybrid_trainer.py` - Main hybrid trainer implementation
-- `src/rbsqa/training/__init__.py` - Package initialization
-- `scripts/train_rbs_hybrid.py` - Executable training script
-- `tests/unit/test_rbs/test_hybrid_training_config.py` - Config unit tests
-- `tests/unit/test_rbs/test_hybrid_trainer.py` - Trainer unit tests
-- `tests/integration/test_rbs/test_full_hybrid_training.py` - Integration tests
-
-### Change Log
-- **Added**: Complete hybrid training pipeline infrastructure
-- **Added**: Two-stage training with automatic transitions
-- **Added**: Dual optimization for QA and RL components
-- **Added**: Robust checkpoint management system
-- **Added**: Comprehensive configuration system
-- **Added**: Full test suite with unit and integration tests
-- **Added**: Executable training script with CLI interface
-- **Added**: Validation scripts for implementation verification
-
-### Status
-✅ **Ready for Review** - All acceptance criteria met, comprehensive testing completed
-
-## Out of Scope
-
-- Distributed training across multiple GPUs/nodes
-- Advanced RL algorithms beyond REINFORCE
-- Hyperparameter optimization
-- Advanced curriculum learning strategies
-
-## Notes
-
-The hybrid training pipeline is the cornerstone of RBS-QA research. It must balance:
-
-1. **Stability**: Maintain QA accuracy while learning efficiency
-2. **Curriculum**: Proper progression from supervised to hybrid learning
-3. **Flexibility**: Support various experimental configurations
-4. **Robustness**: Handle training interruptions and resume gracefully
-5. **Observability**: Provide comprehensive logging and metrics
-
-The two-stage approach ensures the model first learns accurate QA before optimizing for computational efficiency, preventing the RL component from degrading task performance.
-
-## QA Results
-
-### Review Date: 2025-11-06
-
-### Reviewed By: Quinn (Test Architect)
-
-### Code Quality Assessment
-
-**Excellent implementation quality** with comprehensive architecture design, robust error handling, and extensive testing coverage. The hybrid training pipeline demonstrates professional-grade software engineering practices with clear separation of concerns, proper abstraction layers, and thoughtful configuration management. The code follows ML engineering best practices with proper checkpoint management, logging, and device handling.
-
-### Refactoring Performed
-
-No refactoring was required during this review. The implementation demonstrates high code quality with:
-- Clean architectural separation between configuration, training logic, and execution
-- Proper use of Python dataclasses for configuration management
-- Comprehensive error handling and graceful interruption support
-- Appropriate use of modern PyTorch practices and device management
-
-### Compliance Check
-
-- Coding Standards: ✓ Adheres to project standards with consistent naming, documentation, and structure
-- Project Structure: ✓ Proper organization within src/rbsqa/ package with logical module separation
-- Testing Strategy: ✓ Comprehensive test coverage with unit, integration, and validation tests (1,357 lines of test code)
-- All ACs Met: ✓ All 5 acceptance criteria fully implemented with robust validation
-
-### Improvements Checklist
-
-- [x] Validated Python syntax across all implementation files
-- [x] Confirmed comprehensive test coverage (457 + 584 + 316 test lines)
-- [x] Verified security practices (safe torch.save/load with map_location='cpu')
-- [x] Assessed performance considerations (efficient checkpoint management, gradient clipping)
-- [x] Confirmed proper error handling and recovery mechanisms
-- [x] Validated configuration system completeness and flexibility
-- [x] Reviewed logging and observability features
-- [x] Confirmed proper device handling and memory management
-
-### Security Review
-
-**No security concerns identified.** The implementation demonstrates secure coding practices:
-- Safe usage of torch.save/load with explicit map_location='cpu' to prevent device-specific attacks
-- No use of eval(), exec(), or subprocess calls that could lead to code injection
-- Proper file path handling with os.makedirs() for directory creation
-- No pickle usage beyond torch's internal serialization
-
-### Performance Considerations
-
-**Performance-conscious implementation** with several optimizations:
-- Efficient checkpoint management with automatic cleanup to prevent disk space issues
-- Gradient clipping to prevent training instability
-- Proper memory management with device-aware tensor operations
-- Configurable batch sizes and dataloader parameters for hardware optimization
-- Early stopping mechanism to prevent overtraining
-- Comprehensive logging with configurable verbosity to avoid performance impact
-
-### Files Modified During Review
-
-None - no modifications were required during this QA review.
-
-### Gate Status
-
-Gate: PASS → docs/qa/gates/2.4.rbs-training-pipeline-hybrid-learning.yml
-Risk profile: No risks identified - comprehensive implementation with robust testing
-NFR assessment: All NFRs (security, performance, reliability, maintainability) - PASS
-
-### Recommended Status
-
-✓ Ready for Done
-
-This story demonstrates exceptional implementation quality with comprehensive testing coverage, robust architecture, and adherence to ML engineering best practices. The hybrid training pipeline is production-ready with proper error handling, checkpoint management, and extensive validation.
