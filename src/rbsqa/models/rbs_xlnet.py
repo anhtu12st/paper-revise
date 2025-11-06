@@ -5,6 +5,7 @@ Integrates GMM-XLNet backbone with belief state tracking and halting policy
 for adaptive long-context question answering.
 """
 
+import logging
 import json
 import os
 import time
@@ -19,6 +20,8 @@ try:
     from unittest.mock import MagicMock
 except ImportError:
     MagicMock = None  # Not available in production
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 from ..belief_state import BeliefStateTracker
 from ..halting_policy import HaltingPolicyNetwork, HaltingDecision, HaltingStateFeatures
@@ -26,7 +29,6 @@ from ..halting_policy import HaltingPolicyNetwork, HaltingDecision, HaltingState
 
 if TYPE_CHECKING:
     from ..belief_state import BeliefState
-
 
 class RBSXLNetForQA(nn.Module):
     """
