@@ -170,9 +170,15 @@ class RBSTrainer(XLNetRecurrentTrainer):
                     logger.error(f"Input shapes: IDs={input_ids.shape}, Attention={attention_mask.shape}")
                     raise
 
-            start_logits = outputs["start_logits"]
-            end_logits = outputs["end_logits"]
-            new_memory_state = outputs["new_memory_state"]
+            # Handle RBSModelOutput (dataclass) or dictionary format
+            if hasattr(outputs, 'start_logits'):  # RBSModelOutput dataclass
+                start_logits = outputs.start_logits
+                end_logits = outputs.end_logits
+                new_memory_state = outputs.memory_state
+            else:  # Dictionary format
+                start_logits = outputs["start_logits"]
+                end_logits = outputs["end_logits"]
+                new_memory_state = outputs["new_memory_state"]
 
             # Collect logits and labels per document
             self._collect_document_outputs(batch, document_mask, start_logits, end_logits,
