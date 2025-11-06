@@ -202,18 +202,23 @@ class RBSTrainer(XLNetRecurrentTrainer):
                     else:
                         expert_memory = prev[f"expert_{expert_idx}"]
 
-                # Ensure consistent 2D tensor shape for stacking
+                # Ensure consistent 3D tensor shape for XLNet compatibility
                 if expert_memory.dim() == 3:  # Shape: [1, memory_slots, hidden_dim]
-                    expert_memory = expert_memory.squeeze(0)  # -> [memory_slots, hidden_dim]
-                elif expert_memory.dim() == 2:  # Shape: [memory_slots, hidden_dim]
+                    # Keep as 3D - maintain batch dimension for XLNet compatibility
                     pass  # Already correct shape
+                elif expert_memory.dim() == 2:  # Shape: [memory_slots, hidden_dim]
+                    expert_memory = expert_memory.unsqueeze(0)  # -> [1, memory_slots, hidden_dim]
                 else:
                     raise ValueError(f"Unexpected expert memory shape: {expert_memory.shape}, expected 2D or 3D tensor")
 
+                # Validate tensor shape
+                if expert_memory.dim() != 3 or expert_memory.shape[0] != 1:
+                    raise ValueError(f"Invalid expert memory shape after normalization: {expert_memory.shape}, expected [1, memory_slots, hidden_dim]")
+
                 expert_memories.append(expert_memory)
 
-            # Stack expert memories across batch
-            memory_state_batch[f"expert_{expert_idx}"] = torch.stack(expert_memories, dim=0)
+            # Stack expert memories across batch to create [batch_size, memory_slots, hidden_dim]
+            memory_state_batch[f"expert_{expert_idx}"] = torch.cat(expert_memories, dim=0)
 
         return memory_state_batch
 
