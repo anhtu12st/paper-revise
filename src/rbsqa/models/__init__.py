@@ -7,6 +7,7 @@ import torch
 
 from ..belief_state import BeliefState
 from ..halting_policy import HaltingDecision, HaltingStateFeatures
+from .rbs_xlnet import RBSXLNetForQA
 
 
 @dataclass

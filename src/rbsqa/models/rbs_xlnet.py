@@ -22,7 +22,7 @@ except ImportError:
 
 from ..belief_state import BeliefStateTracker
 from ..halting_policy import HaltingPolicyNetwork, HaltingDecision, HaltingStateFeatures
-from . import RBSModelConfig, RBSModelOutput, RBSInferenceResult
+# Avoid circular imports by importing inside functions where needed
 
 if TYPE_CHECKING:
     from ..belief_state import BeliefState
@@ -51,7 +51,8 @@ class RBSXLNetForQA(nn.Module):
                  **kwargs):
         super().__init__()
 
-        # Create and validate configuration
+        # Create and validate configuration (import here to avoid circular import)
+        from . import RBSModelConfig
         self.config = RBSModelConfig(
             base_model_name=base_model_name,
             memory_num_tokens=memory_num_tokens,
@@ -130,7 +131,7 @@ class RBSXLNetForQA(nn.Module):
                 memory_state: Optional[Dict[str, torch.Tensor]] = None,
                 segment_info: Optional[Dict] = None,
                 return_dict: bool = True,
-                **kwargs) -> Union[Tuple, RBSModelOutput]:
+                **kwargs) -> Union[Tuple, "RBSModelOutput"]:
         """
         Forward pass supporting both RBS and legacy modes.
 
@@ -165,11 +166,12 @@ class RBSXLNetForQA(nn.Module):
                     attention_mask: torch.Tensor,
                     memory_state: Optional[Dict[str, torch.Tensor]],
                     segment_info: Dict,
-                    **kwargs) -> RBSModelOutput:
+                    **kwargs) -> "RBSModelOutput":
         """RBS mode forward pass with belief tracking and halting decisions."""
 
         # Create memory token IDs for GMM processing
         batch_size = input_ids.size(0)
+        seq_len = input_ids.size(-1)
         device = input_ids.device
 
         # Use placeholder memory token IDs (these should match the tokenizer)
@@ -277,6 +279,8 @@ class RBSXLNetForQA(nn.Module):
                 "routing_logits": torch.randn(batch_size, self.config.num_memory_experts)
             }
 
+        # Import here to avoid circular import
+        from . import RBSModelOutput
         return RBSModelOutput(
             start_logits=output_start_logits,
             end_logits=output_end_logits,
@@ -294,7 +298,7 @@ class RBSXLNetForQA(nn.Module):
                        input_ids: torch.Tensor,
                        attention_mask: torch.Tensor,
                        memory_state: Optional[Dict[str, torch.Tensor]],
-                       **kwargs) -> RBSModelOutput:
+                       **kwargs) -> "RBSModelOutput":
         """Legacy GMM mode forward pass (backward compatibility)."""
 
         # Create memory token IDs for GMM processing
@@ -351,6 +355,8 @@ class RBSXLNetForQA(nn.Module):
                 "routing_logits": torch.randn(batch_size, self.config.num_memory_experts)
             }
 
+        # Import here to avoid circular import
+        from . import RBSModelOutput
         return RBSModelOutput(
             start_logits=output_start_logits,
             end_logits=output_end_logits,
@@ -368,7 +374,7 @@ class RBSXLNetForQA(nn.Module):
                           question_input_ids: torch.Tensor,
                           context_segments: List[torch.Tensor],
                           max_segments: Optional[int] = None,
-                          **kwargs) -> RBSInferenceResult:
+                          **kwargs) -> "RBSInferenceResult":
         """
         Adaptive inference with early stopping based on confidence.
 
@@ -466,6 +472,8 @@ class RBSXLNetForQA(nn.Module):
 
         efficiency_score = len(context_segments) / max(len(processed_segments), 1)
 
+        # Import here to avoid circular import
+        from . import RBSInferenceResult
         return RBSInferenceResult(
             answer_span=final_span,
             confidence=final_confidence,
@@ -480,7 +488,7 @@ class RBSXLNetForQA(nn.Module):
     def _full_inference(self,
                        question_input_ids: torch.Tensor,
                        context_segments: List[torch.Tensor],
-                       **kwargs) -> RBSInferenceResult:
+                       **kwargs) -> "RBSInferenceResult":
         """Full inference without adaptive stopping (fallback mode)."""
 
         device = question_input_ids.device
@@ -519,6 +527,8 @@ class RBSXLNetForQA(nn.Module):
         end_probs = F.softmax(outputs.end_logits, dim=-1)
         confidence = (start_probs[0, start_pos] * end_probs[0, end_pos]).item()
 
+        # Import here to avoid circular import
+        from . import RBSInferenceResult
         return RBSInferenceResult(
             answer_span=(start_pos, end_pos),
             confidence=confidence,

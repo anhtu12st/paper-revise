@@ -32,7 +32,7 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
 from rbsqa.models import RBSXLNetForQA
-from rbsqa.training import RBSTrainingConfig
+from rbsqa.config import RBSTrainingConfig
 from memxlnet.training import XLNetRecurrentTrainer
 
 logging.basicConfig(level=logging.INFO)
@@ -65,13 +65,30 @@ def create_config():
         memory_num_tokens=16,  # RBSQA memory slots
         memory_update="gated",
         memory_init="learned",
-        # ✅ RBSQA: Use belief state architecture instead of GMM
-        use_rbsqa=True,
-        belief_state_dim=64,  # Belief state dimension
-        max_reasoning_steps=5,  # Maximum reasoning steps
-        halting_threshold=0.9,  # Halting decision threshold
-        belief_update_weight=0.1,  # Belief state update loss weight
-        halting_policy_weight=0.05,  # Halting policy loss weight
+        # ✅ RBSQA: Use belief state architecture (RBS extends GMM)
+        use_gmm_memory=True,  # RBS requires GMM memory
+        # RBS-specific parameters
+        use_belief_state=True,
+        belief_state_threshold=0.9,  # Halting decision threshold
+        enable_re_scoring=True,
+        confidence_calibration=True,
+        re_scoring_method="context_weighted",
+        enable_trend_analysis=True,
+        max_segments=32,  # Maximum reasoning steps equivalent
+        belief_state_memory_limit=100,
+        halting_patience=3,
+        # Halting policy settings
+        use_halting_policy=True,
+        halting_policy_hidden_dim=64,  # Belief state dimension equivalent
+        halting_policy_layers=2,
+        halting_temperature=1.0,
+        halting_exploration_rate=0.1,
+        # RL training settings
+        rl_weight=0.1,  # Belief update weight equivalent
+        lambda_cost=0.01,
+        gamma=0.99,
+        use_value_baseline=True,
+        value_weight=0.05,  # Halting policy weight equivalent
         # Global softmax and training settings
         use_global_softmax=False,
         num_epochs=5,
@@ -118,12 +135,15 @@ def main():
     config = create_config()
 
     print("🔧 RBSQA Configuration Summary:")
-    print(f"   - Belief state dimension: {config.belief_state_dim}")
-    print(f"   - Max reasoning steps: {config.max_reasoning_steps}")
-    print(f"   - Halting threshold: {config.halting_threshold}")
+    print(f"   - Belief state enabled: {config.use_belief_state}")
+    print(f"   - Belief state threshold: {config.belief_state_threshold}")
+    print(f"   - Max segments: {config.max_segments}")
+    print(f"   - Re-scoring method: {config.re_scoring_method}")
+    print(f"   - Halting policy enabled: {config.use_halting_policy}")
+    print(f"   - Halting hidden dim: {config.halting_policy_hidden_dim}")
     print(f"   - Memory slots: {config.memory_num_tokens}")
-    print(f"   - Belief update weight: {config.belief_update_weight}")
-    print(f"   - Halting policy weight: {config.halting_policy_weight}")
+    print(f"   - RL weight: {config.rl_weight}")
+    print(f"   - Value weight: {config.value_weight}")
     print()
 
     # Create a custom RBSQA trainer using the existing infrastructure
@@ -135,17 +155,27 @@ def main():
             super().__init__(config)
 
             # Override model to use RBSQA if enabled
-            if config.use_rbsqa:
+            if config.use_belief_state:
                 logger.info("🔧 Initializing RBSQA-XLNet model")
                 self.model = RBSXLNetForQA(
-                    base_model=self.base_model,
-                    belief_state_dim=config.belief_state_dim,
-                    max_reasoning_steps=config.max_reasoning_steps,
-                    halting_threshold=config.halting_threshold,
-                    memory_slots=16,  # Standard memory slots
-                    use_rbsqa=True,
+                    base_model_name=config.model_name,
+                    memory_num_tokens=16,  # Standard memory slots
+                    num_memory_experts=4,  # RBS requires GMM experts
+                    use_rbs_mode=True,
+                    belief_state_config={
+                        "max_segments": config.max_segments,
+                        "confidence_threshold": config.belief_state_threshold,
+                        "re_scoring_method": config.re_scoring_method,
+                        "enable_trend_analysis": config.enable_trend_analysis,
+                    },
+                    halting_config={
+                        "hidden_dim": config.halting_policy_hidden_dim,
+                        "num_layers": config.halting_policy_layers,
+                        "temperature": config.halting_temperature,
+                        "exploration_rate": config.halting_exploration_rate,
+                    },
                 )
-                logger.info(f"✅ RBSQA model created with belief state dim {config.belief_state_dim}")
+                logger.info(f"✅ RBSQA model created with belief state threshold {config.belief_state_threshold}")
 
                 # Ensure RBSQA model is on the correct device
                 self.model = self.model.to(self.device)
@@ -159,8 +189,8 @@ def main():
                     halting_device = next(self.model.halting_policy.parameters()).device
                     logger.info(f"✅ Halting policy device: {halting_device}")
 
-                # Test initial memory creation
-                test_memory = self.model.get_initial_memory(1, self.device)
+                # Test initial memory creation (RBS uses GMM backbone)
+                test_memory = self.model.gmm_backbone.get_initial_memory(1, self.device)
                 logger.info(f"✅ Test initial memory created")
                 logger.debug(f"  - Memory device: {next(iter(test_memory.values())).device}")
                 logger.debug(f"  - Memory shape: {next(iter(test_memory.values())).shape}")
@@ -168,7 +198,7 @@ def main():
 
         def _process_document_batch_with_memory(self, time_step_batches, eval_mode=False):
             """Override memory processing for RBSQA models."""
-            if hasattr(self.model, 'use_rbsqa') and self.model.use_rbsqa:
+            if hasattr(self.model, 'use_rbs_mode') and self.model.use_rbs_mode:
                 # RBSQA memory handling
                 self.model.train() if not eval_mode else self.model.eval()
 
@@ -195,54 +225,42 @@ def main():
                     document_mask = batch["document_mask"].to(self.device)
 
                     # Build RBSQA memory state per batch ordering with device consistency
-                    memory_state_batch = []
-                    for ex_id, active in zip(batch["example_ids"], document_mask.tolist()):
-                        if not active:
-                            # New document: use initial memory (already on correct device)
-                            initial_memory = self.model.get_initial_memory(1, self.device)
-                            # 🔧 FIX: Handle different possible RBSQA memory key formats
-                            if isinstance(initial_memory, dict):
-                                # Try common key names RBSQA might use
-                                memory_state = (initial_memory.get("memory_state") or
-                                              initial_memory.get("memory") or
-                                              initial_memory.get("state") or
-                                              next(iter(initial_memory.values())) if initial_memory else None)
-                            else:
-                                memory_state = initial_memory
+                    # RBS uses GMM backbone, so it uses GMM memory format (dict with expert keys)
+                    memory_state_batch = {}
+                    for expert_idx in range(4):  # RBS requires 4 GMM experts
+                        expert_memories = []
 
-                            if memory_state is None:
-                                raise ValueError(f"Could not extract memory state from initial_memory: {list(initial_memory.keys()) if isinstance(initial_memory, dict) else type(initial_memory)}")
-                        else:
-                            # Existing document: get from memory bank
-                            prev = self.memory_bank.get(ex_id)
-                            if prev is None:
-                                initial_memory = self.model.get_initial_memory(1, self.device)
-                                if isinstance(initial_memory, dict):
-                                    memory_state = (initial_memory.get("memory_state") or
-                                                  initial_memory.get("memory") or
-                                                  initial_memory.get("state") or
-                                                  next(iter(initial_memory.values())) if initial_memory else None)
+                        for ex_id, active in zip(batch["example_ids"], document_mask.tolist()):
+                            if not active:
+                                # New document: use initial memory (already on correct device)
+                                initial_memory = self.model.gmm_backbone.get_initial_memory(1, self.device)
+                                expert_memory = initial_memory[f"expert_{expert_idx}"]
+                            else:
+                                # Existing document: get from memory bank
+                                prev = self.memory_bank.get(ex_id)
+                                if prev is None:
+                                    initial_memory = self.model.gmm_backbone.get_initial_memory(1, self.device)
+                                    expert_memory = initial_memory[f"expert_{expert_idx}"]
                                 else:
-                                    memory_state = initial_memory
+                                    expert_memory = prev[f"expert_{expert_idx}"]  # Already on correct device
+
+                            # Ensure consistent 2D tensor shape for stacking
+                            if expert_memory.dim() == 3:  # Shape: [1, memory_slots, hidden_dim]
+                                expert_memory = expert_memory.squeeze(0)  # -> [memory_slots, hidden_dim]
+                            elif expert_memory.dim() == 2:  # Shape: [memory_slots, hidden_dim]
+                                pass  # Already correct shape
                             else:
-                                memory_state = prev  # Already on correct device
+                                raise ValueError(f"Unexpected expert memory shape: {expert_memory.shape}, expected 2D or 3D tensor")
 
-                        # Ensure consistent 2D tensor shape for stacking
-                        if memory_state.dim() == 3:  # Shape: [1, memory_slots, hidden_dim]
-                            memory_state = memory_state.squeeze(0)  # -> [memory_slots, hidden_dim]
-                        elif memory_state.dim() == 2:  # Shape: [memory_slots, hidden_dim]
-                            pass  # Already correct shape
-                        else:
-                            raise ValueError(f"Unexpected memory shape: {memory_state.shape}, expected 2D or 3D tensor")
+                            expert_memories.append(expert_memory)
 
-                        memory_state_batch.append(memory_state)
-
-                    # Stack memory states across batch (already on correct device)
-                    memory_state_batch = torch.stack(memory_state_batch, dim=0)
+                        # Stack expert memories across batch (already on correct device)
+                        memory_state_batch[f"expert_{expert_idx}"] = torch.stack(expert_memories, dim=0)
 
                     # Validate tensor shapes
                     if not eval_mode:
-                        logger.debug(f"RBSQA memory state shape: {memory_state_batch.shape}")
+                        shapes = [(k, v.shape) for k, v in memory_state_batch.items()]
+                        logger.debug(f"RBSQA memory state shapes: {shapes}")
                     else:
                         logger.debug("Evaluation mode - skipping tensor shape validation")
 
@@ -289,17 +307,10 @@ def main():
                     end_logits = outputs["end_logits"]
                     new_memory_state = outputs["new_memory_state"]
 
-                    # 🔧 FIX: Handle RBSQA memory output format (could be dict or tensor)
-                    if isinstance(new_memory_state, dict):
-                        # Extract the main memory tensor from dict
-                        memory_tensor = (new_memory_state.get("memory_state") or
-                                       new_memory_state.get("memory") or
-                                       new_memory_state.get("state") or
-                                       next(iter(new_memory_state.values())) if new_memory_state else None)
-                        if memory_tensor is None:
-                            raise ValueError(f"Could not extract memory tensor from new_memory_state: {list(new_memory_state.keys())}")
-                    else:
-                        memory_tensor = new_memory_state
+                    # 🔧 FIX: Handle RBSQA memory output format (uses GMM format)
+                    # RBS returns GMM format memory (dict with expert keys)
+                    if not isinstance(new_memory_state, dict):
+                        raise ValueError(f"Expected dict memory state from RBS model, got {type(new_memory_state)}")
 
                     # Collect logits and labels per document
                     for ex_id, active in zip(batch["example_ids"], document_mask.tolist()):
@@ -308,20 +319,23 @@ def main():
                             example_ids_list = batch["example_ids"].tolist() if hasattr(batch["example_ids"], 'tolist') else batch["example_ids"]
                             ex_idx = example_ids_list.index(ex_id)
 
-                            # 🔧 FIX: Extract individual memory and store in bank
-                            if memory_tensor.dim() >= 2:
-                                individual_memory = memory_tensor[ex_idx].detach()
-                            else:
-                                raise ValueError(f"Unexpected memory tensor shape: {memory_tensor.shape}")
+                            # 🔧 FIX: Extract individual memory for each expert and store in bank
+                            individual_memory = {}
+                            for expert_key, expert_tensor in new_memory_state.items():
+                                if expert_tensor.dim() >= 2:
+                                    individual_memory[expert_key] = expert_tensor[ex_idx].detach()
+                                else:
+                                    raise ValueError(f"Unexpected expert tensor shape: {expert_tensor.shape}")
 
-                            # Store in memory bank (RBSQA stores single tensor, not dict)
+                            # Store in memory bank (RBS stores dict like GMM)
                             self.memory_bank[ex_id] = individual_memory
 
-                            # 🔧 FIX: Add memory validation in both train and eval modes
+                            # 🔧 FIX: Add memory validation in both train and eval modes (for dict memory)
                             # Validate memory bank storage consistency (optimized)
-                            if self.memory_bank[ex_id].device.type != self.device.type:
-                                logger.debug(f"Memory bank {ex_id} device mismatch: {self.memory_bank[ex_id].device} vs {self.device}")
-                                self.memory_bank[ex_id] = self.memory_bank[ex_id].to(self.device)
+                            for expert_key, expert_tensor in self.memory_bank[ex_id].items():
+                                if expert_tensor.device.type != self.device.type:
+                                    logger.debug(f"Memory bank {ex_id} expert {expert_key} device mismatch: {expert_tensor.device} vs {self.device}")
+                                    self.memory_bank[ex_id][expert_key] = expert_tensor.to(self.device)
 
                             # 🔧 FIX: Add cleanup in both train and eval modes to prevent OOM
                             # Monitor memory bank size and implement automatic cleanup
@@ -389,7 +403,7 @@ def main():
 
         def train_one_document_batch(self, time_step_batches):
             """Override train_one_document_batch to handle RBSQA memory structure."""
-            if hasattr(self.model, 'use_rbsqa') and self.model.use_rbsqa:
+            if hasattr(self.model, 'use_rbs_mode') and self.model.use_rbs_mode:
                 return self._process_document_batch_with_memory(time_step_batches, eval_mode=False)
             else:
                 # Non-RBSQA model: use parent's implementation
@@ -397,7 +411,7 @@ def main():
 
         def _train_single_stage(self, train_dataloader, eval_dataloader, eval_dataset, stage_num):
             """Override _train_single_stage to add epoch cleanup for RBSQA models."""
-            if hasattr(self.model, 'use_rbsqa') and self.model.use_rbsqa:
+            if hasattr(self.model, 'use_rbs_mode') and self.model.use_rbs_mode:
                 # Call parent implementation but ensure cleanup happens
                 from memxlnet.training.trainer import XLNetRecurrentTrainer
 
@@ -423,10 +437,10 @@ def main():
 
         def on_epoch_end(self):
             """Called at the end of each epoch to cleanup resources."""
-            if hasattr(self.model, 'use_rbsqa') and self.model.use_rbsqa:
+            if hasattr(self.model, 'use_rbs_mode') and self.model.use_rbs_mode:
                 self._clear_memory_bank()
-                # Reset RBSQA model memory
-                self.model.reset_memory()
+                # Reset RBSQA model memory (uses GMM backbone)
+                self.model.gmm_backbone.reset_memory()
                 logger.debug("Reset RBSQA model memory at epoch end")
 
             # Call parent implementation if it exists

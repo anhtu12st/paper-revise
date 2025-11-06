@@ -33,7 +33,7 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
 from rbsqa.models import RBSXLNetForQA
-from rbsqa.training import RBSTrainingConfig
+from rbsqa.config import RBSTrainingConfig
 from memxlnet.training import XLNetRecurrentTrainer
 
 logging.basicConfig(level=logging.INFO)
