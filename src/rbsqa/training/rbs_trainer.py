@@ -193,12 +193,12 @@ class RBSTrainer(XLNetRecurrentTrainer):
     def _build_rbs_memory_state(self, batch: Dict, document_mask: torch.Tensor) -> Dict[str, torch.Tensor]:
         """Build RBS memory state batch using GMM format."""
         # Enhanced logging for tensor shape debugging
-        logger.info("=" * 60)
-        logger.info("🔍 BUILDING RBS MEMORY STATE - DEBUG INFO")
-        logger.info("=" * 60)
-        logger.info(f"Batch size: {len(batch['example_ids'])}")
-        logger.info(f"Document mask: {document_mask.tolist()}")
-        logger.info(f"Active documents: {document_mask.sum().item()}")
+        logger.debug("=" * 60)
+        logger.debug("🔍 BUILDING RBS MEMORY STATE - DEBUG INFO")
+        logger.debug("=" * 60)
+        logger.debug(f"Batch size: {len(batch['example_ids'])}")
+        logger.debug(f"Document mask: {document_mask.tolist()}")
+        logger.debug(f"Active documents: {document_mask.sum().item()}")
 
         memory_state_batch = {}
         for expert_idx in range(4):  # RBS requires 4 GMM experts
@@ -219,10 +219,10 @@ class RBSTrainer(XLNetRecurrentTrainer):
                         expert_memory = prev[f"expert_{expert_idx}"]
 
                 # Log detailed memory info for debugging
-                logger.info(f"Expert {expert_idx}, Document {ex_id}, Active {active}:")
-                logger.info(f"  - Raw expert memory shape: {expert_memory.shape}")
-                logger.info(f"  - Raw expert memory device: {expert_memory.device}")
-                logger.info(f"  - Raw expert memory dtype: {expert_memory.dtype}")
+                logger.debug(f"Expert {expert_idx}, Document {ex_id}, Active {active}:")
+                logger.debug(f"  - Raw expert memory shape: {expert_memory.shape}")
+                logger.debug(f"  - Raw expert memory device: {expert_memory.device}")
+                logger.debug(f"  - Raw expert memory dtype: {expert_memory.dtype}")
 
                 # Ensure consistent 3D tensor shape for XLNet compatibility
                 if expert_memory.dim() == 3:  # Shape: [1, memory_slots, hidden_dim]
@@ -230,7 +230,7 @@ class RBSTrainer(XLNetRecurrentTrainer):
                     pass  # Already correct shape
                 elif expert_memory.dim() == 2:  # Shape: [memory_slots, hidden_dim]
                     expert_memory = expert_memory.unsqueeze(0)  # -> [1, memory_slots, hidden_dim]
-                    logger.info(f"  - Reshaped from 2D to 3D: {expert_memory.shape}")
+                    logger.debug(f"  - Reshaped from 2D to 3D: {expert_memory.shape}")
                 else:
                     logger.error(f"  - Unexpected tensor dimensions: {expert_memory.dim()}D, shape: {expert_memory.shape}")
                     raise ValueError(f"Unexpected expert memory shape: {expert_memory.shape}, expected 2D or 3D tensor")
@@ -240,16 +240,16 @@ class RBSTrainer(XLNetRecurrentTrainer):
                     logger.error(f"  - Invalid shape after normalization: {expert_memory.shape}")
                     raise ValueError(f"Invalid expert memory shape after normalization: {expert_memory.shape}, expected [1, memory_slots, hidden_dim]")
 
-                logger.info(f"  - Final expert memory shape: {expert_memory.shape}")
+                logger.debug(f"  - Final expert memory shape: {expert_memory.shape}")
                 expert_memories.append(expert_memory)
 
             # Stack expert memories across batch to create [batch_size, memory_slots, hidden_dim]
-            logger.info(f"Expert {expert_idx}: Concatenating {len(expert_memories)} memories")
+            logger.debug(f"Expert {expert_idx}: Concatenating {len(expert_memories)} memories")
             for i, mem in enumerate(expert_memories):
-                logger.info(f"  Memory {i}: shape={mem.shape}, device={mem.device}")
+                logger.debug(f"  Memory {i}: shape={mem.shape}, device={mem.device}")
 
             concatenated_tensor = torch.cat(expert_memories, dim=0)
-            logger.info(f"  Concatenated shape: {concatenated_tensor.shape}")
+            logger.debug(f"  Concatenated shape: {concatenated_tensor.shape}")
             memory_state_batch[f"expert_{expert_idx}"] = concatenated_tensor
 
         # Validate batch size consistency across all experts
@@ -257,11 +257,11 @@ class RBSTrainer(XLNetRecurrentTrainer):
 
         # Add debug logging for batch sizes
         document_mask_active = document_mask.sum().item()
-        logger.info(f"Final validation: expected_batch_size={expected_batch_size}, active_docs={document_mask_active}")
+        logger.debug(f"Final validation: expected_batch_size={expected_batch_size}, active_docs={document_mask_active}")
 
         for expert_key, expert_tensor in memory_state_batch.items():
             actual_batch_size = expert_tensor.size(0)
-            logger.info(f"Expert {expert_key}: shape={expert_tensor.shape}, batch_size={actual_batch_size}")
+            logger.debug(f"Expert {expert_key}: shape={expert_tensor.shape}, batch_size={actual_batch_size}")
 
             if actual_batch_size != expected_batch_size:
                 # Provide more detailed error information
@@ -397,9 +397,9 @@ class RBSTrainer(XLNetRecurrentTrainer):
 
         if not eval_mode:
             if memory_bank_size > 1000:  # Prevent memory leaks
-                logger.warning(f"Memory bank has grown to {memory_bank_size} documents, consider cleanup")
+                logger.debug(f"Memory bank has grown to {memory_bank_size} documents, consider cleanup")
             if memory_bank_size % 100 == 0 and memory_bank_size > 0:
-                logger.info(f"Memory bank size: {memory_bank_size} documents")
+                logger.debug(f"Memory bank size: {memory_bank_size} documents")
 
         # Automatic cleanup (more aggressive for long documents)
         MEMORY_BANK_LIMIT = 2000  # Configurable based on dataset
@@ -416,7 +416,7 @@ class RBSTrainer(XLNetRecurrentTrainer):
                 del self.memory_bank[doc_id]
                 removed_count += 1
 
-        logger.info(f"🧹 Automatic memory bank cleanup: removed {removed_count} documents "
+        logger.debug(f"🧹 Automatic memory bank cleanup: removed {removed_count} documents "
                    f"(old size: {current_size}, new size: {len(self.memory_bank)})")
 
         # Force garbage collection
@@ -427,7 +427,7 @@ class RBSTrainer(XLNetRecurrentTrainer):
             # Log memory usage after cleanup
             memory_allocated = torch.cuda.memory_allocated() / 1024**3  # GB
             memory_reserved = torch.cuda.memory_reserved() / 1024**3  # GB
-            logger.info(f"🧹 Memory after cleanup: Allocated={memory_allocated:.2f}GB, Reserved={memory_reserved:.2f}GB")
+            logger.debug(f"🧹 Memory after cleanup: Allocated={memory_allocated:.2f}GB, Reserved={memory_reserved:.2f}GB")
 
     def _compute_document_loss(self, per_doc_logits_start: Dict, per_doc_logits_end: Dict,
                               per_doc_labels_start: Dict, per_doc_labels_end: Dict) -> float:
@@ -454,7 +454,7 @@ class RBSTrainer(XLNetRecurrentTrainer):
         """Override train_one_document_batch to handle RBS memory structure."""
         # CRITICAL FIX: Always use RBS memory processing - never fall back to parent method
         # The parent method expects 'mems' parameter which RBS models don't support
-        logger.info("🔍 Using RBS document batch processing (never fall back to parent method)")
+        logger.debug("🔍 Using RBS document batch processing (never fall back to parent method)")
 
         # Ensure we're using the correct model type for RBS
         if not (hasattr(self.model, 'use_rbs_mode') and self.model.use_rbs_mode):
@@ -496,15 +496,15 @@ class RBSTrainer(XLNetRecurrentTrainer):
         if hasattr(self.model, 'use_rbs_mode') and self.model.use_rbs_mode:
             # RBS-specific metrics would be collected here
             # For now, log basic RBS configuration info
-            logger.info("📊 RBS Model Metrics:")
-            logger.info(f"   - Belief state enabled: {self.model.use_rbs_mode}")
-            logger.info(f"   - Number of GMM experts: {self.model.config.num_memory_experts}")
-            logger.info(f"   - Memory slots per expert: {self.model.config.memory_num_tokens}")
+            logger.debug("📊 RBS Model Metrics:")
+            logger.debug(f"   - Belief state enabled: {self.model.use_rbs_mode}")
+            logger.debug(f"   - Number of GMM experts: {self.model.config.num_memory_experts}")
+            logger.debug(f"   - Memory slots per expert: {self.model.config.memory_num_tokens}")
 
             # Add RBS-specific metrics if available
             if "avg_reasoning_steps" in metrics:
-                logger.info(f"   - Avg reasoning steps: {metrics['avg_reasoning_steps']:.2f}")
+                logger.debug(f"   - Avg reasoning steps: {metrics['avg_reasoning_steps']:.2f}")
             if "halting_accuracy" in metrics:
-                logger.info(f"   - Halting accuracy: {metrics['halting_accuracy']:.2f}%")
+                logger.debug(f"   - Halting accuracy: {metrics['halting_accuracy']:.2f}%")
             if "belief_revision_rate" in metrics:
-                logger.info(f"   - Belief revision rate: {metrics['belief_revision_rate']:.2f}%")
+                logger.debug(f"   - Belief revision rate: {metrics['belief_revision_rate']:.2f}%")

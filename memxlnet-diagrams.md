@@ -87,10 +87,10 @@ graph LR
     end
 
     subgraph "Memory Operations"
-        F[Memory State M^(i-1)] --> G[Replace MEM_READ]
+        F["Memory State M^(i-1)"] --> G[Replace MEM_READ]
         E --> H[Extract MEM_WRITE States]
         H --> I[Gated Update]
-        I --> J[Memory State M^i]
+        I --> J["Memory State M^i"]
         J --> F
     end
 
@@ -264,7 +264,7 @@ graph LR
 ```mermaid
 graph TB
     subgraph "Configuration"
-        A[TrainingConfig] --> B[Progressive Segments: [2,4,6]]
+        A[TrainingConfig] --> B["Progressive Segments: [2,4,6]"]
         A --> C[Memory Tokens: 16]
         A --> D[Phase-2 Warmup Controls]
     end
@@ -425,10 +425,10 @@ graph LR
     A --> D[6 Segments]
     A --> E[12+ Segments]
 
-    B --> F[77% EM<br/>(Baseline + Memory)]
-    C --> G[57% vs 81% EM<br/>(+24% improvement)]
-    D --> H[52% vs 79% EM<br/>(+27% improvement)]
-    E --> I[52% vs 76% EM<br/>(+24% improvement)]
+    B --> F["77% EM<br/>(Baseline + Memory)"]
+    C --> G["57% vs 81% EM<br/>(+24% improvement)"]
+    D --> H["52% vs 79% EM<br/>(+27% improvement)"]
+    E --> I["52% vs 76% EM<br/>(+24% improvement)"]
 
     style F fill:#e8f5e8
     style G fill:#4caf50

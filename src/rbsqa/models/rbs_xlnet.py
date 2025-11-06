@@ -309,20 +309,20 @@ class RBSXLNetForQA(nn.Module):
         device = input_ids.device
 
         # Enhanced validation for tensor shapes and compatibility
-        logger.info("=" * 60)
-        logger.info("🔍 RBS-XLNet FORWARD PASS - VALIDATION")
-        logger.info("=" * 60)
-        logger.info(f"Input shape: {input_ids.shape}")
-        logger.info(f"Attention mask shape: {attention_mask.shape}")
-        logger.info(f"Batch size: {batch_size}")
-        logger.info(f"Sequence length: {seq_len}")
-        logger.info(f"Device: {device}")
+        logger.debug("=" * 60)
+        logger.debug("🔍 RBS-XLNet FORWARD PASS - VALIDATION")
+        logger.debug("=" * 60)
+        logger.debug(f"Input shape: {input_ids.shape}")
+        logger.debug(f"Attention mask shape: {attention_mask.shape}")
+        logger.debug(f"Batch size: {batch_size}")
+        logger.debug(f"Sequence length: {seq_len}")
+        logger.debug(f"Device: {device}")
 
         # Validate memory state if provided
         if memory_state is not None:
-            logger.info("Memory state validation:")
+            logger.debug("Memory state validation:")
             for expert_key, expert_tensor in memory_state.items():
-                logger.info(f"  {expert_key}: shape={expert_tensor.shape}, device={expert_tensor.device}, dtype={expert_tensor.dtype}")
+                logger.debug(f"  {expert_key}: shape={expert_tensor.shape}, device={expert_tensor.device}, dtype={expert_tensor.dtype}")
 
                 # Critical validation: ensure tensors are properly shaped for XLNet
                 if expert_tensor.dim() != 3:
@@ -340,10 +340,10 @@ class RBSXLNetForQA(nn.Module):
                     logger.warning(f"Moving {expert_key} to device {device}")
                     memory_state[expert_key] = expert_tensor.to(device)
         else:
-            logger.info("No memory state provided (initial forward pass)")
+            logger.debug("No memory state provided (initial forward pass)")
 
-        logger.info("✅ Validation complete, proceeding to GMM backbone")
-        logger.info("=" * 60)
+        logger.debug("✅ Validation complete, proceeding to GMM backbone")
+        logger.debug("=" * 60)
 
         # Use placeholder memory token IDs
         mem_read_ids = list(range(1, self.config.memory_num_tokens + 1))
