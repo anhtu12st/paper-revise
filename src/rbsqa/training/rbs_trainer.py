@@ -274,7 +274,8 @@ class RBSTrainer(XLNetRecurrentTrainer):
                 individual_memory = {}
                 for expert_key, expert_tensor in new_memory_state.items():
                     if expert_tensor.dim() >= 2:
-                        individual_memory[expert_key] = expert_tensor[ex_idx].detach()
+                        # Extract individual example and preserve batch dimension [1, memory_slots, hidden_dim]
+                        individual_memory[expert_key] = expert_tensor[ex_idx:ex_idx+1].detach()
                     else:
                         raise ValueError(f"Unexpected expert tensor shape: {expert_tensor.shape}")
 
@@ -292,8 +293,17 @@ class RBSTrainer(XLNetRecurrentTrainer):
 
     def _validate_memory_storage(self, ex_id: str, eval_mode: bool) -> None:
         """Validate memory bank storage and handle cleanup."""
-        # Validate device consistency for dict memory
+        # Validate memory tensor shapes and device consistency
         for expert_key, expert_tensor in self.memory_bank[ex_id].items():
+            # Check tensor dimensions
+            if expert_tensor.dim() != 3:
+                raise ValueError(f"Invalid memory tensor shape for {ex_id} {expert_key}: {expert_tensor.shape}, expected 3D tensor [1, memory_slots, hidden_dim]")
+
+            # Check batch dimension
+            if expert_tensor.shape[0] != 1:
+                raise ValueError(f"Invalid batch dimension for {ex_id} {expert_key}: {expert_tensor.shape[0]}, expected 1")
+
+            # Check device consistency
             if expert_tensor.device.type != self.device.type:
                 logger.debug(f"Memory bank {ex_id} expert {expert_key} device mismatch: {expert_tensor.device} vs {self.device}")
                 self.memory_bank[ex_id][expert_key] = expert_tensor.to(self.device)
