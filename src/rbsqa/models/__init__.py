@@ -27,26 +27,64 @@ class RBSModelOutput:
     @property
     def mems(self) -> List[torch.Tensor]:
         """
-        Convert memory_state to the format expected by base trainer (list of tensors).
+        Convert memory_state to the format expected by XLNet base trainer.
 
-        This provides backward compatibility with existing trainer code that expects
-        outputs.mems to be a list of memory tensors.
+        This provides backward compatibility by transforming GMM expert memories
+        into the sequential memory format expected by XLNet attention mechanism.
+
+        GMM format: {"expert_0": (batch, slots, hidden), "expert_1": (batch, slots, hidden), ...}
+        XLNet format: [(memory_length, batch, hidden)] where memory_length = num_experts * slots
 
         Returns:
-            List of memory tensors in the format expected by XLNet trainer
+            List containing a single memory tensor with shape (memory_length, batch_size, hidden_dim)
         """
         if not self.memory_state:
             return []
 
-        # Convert GMM-style memory dictionary to list format
-        # Extract expert memories in order: expert_0, expert_1, ...
-        mems_list = []
-        for i in range(len(self.memory_state)):
+        # Extract expert memories in order and stack them
+        expert_tensors = []
+        num_experts = len(self.memory_state)
+
+        for i in range(num_experts):
             expert_key = f"expert_{i}"
             if expert_key in self.memory_state:
-                mems_list.append(self.memory_state[expert_key])
+                expert_memory = self.memory_state[expert_key]
+                # Validate expert memory shape
+                if expert_memory.dim() != 3:
+                    raise ValueError(f"Expert memory {expert_key} should be 3D tensor, got {expert_memory.dim()}D")
+                expert_tensors.append(expert_memory)
+            else:
+                # If expert is missing, create zero tensor with same shape as others
+                if expert_tensors:  # Use shape from first available expert
+                    zero_expert = torch.zeros_like(expert_tensors[0])
+                    expert_tensors.append(zero_expert)
 
-        return mems_list
+        if not expert_tensors:
+            return []
+
+        # Validate that all expert memories have the same shape
+        first_shape = expert_tensors[0].shape
+        for i, tensor in enumerate(expert_tensors[1:], 1):
+            if tensor.shape != first_shape:
+                raise ValueError(f"Expert memory shapes must match. expert_0: {first_shape}, expert_{i}: {tensor.shape}")
+
+        # Stack experts along first dimension: (num_experts, batch, slots, hidden)
+        stacked_experts = torch.stack(expert_tensors, dim=0)
+
+        # Reshape to aggregate all memory slots: (batch, num_experts * slots, hidden)
+        batch_size, slots_per_expert, hidden_dim = stacked_experts.shape[1], stacked_experts.shape[2], stacked_experts.shape[3]
+        aggregated_memory = stacked_experts.permute(1, 0, 2, 3).contiguous()  # (batch, num_experts, slots, hidden)
+        aggregated_memory = aggregated_memory.view(batch_size, -1, hidden_dim)  # (batch, total_slots, hidden)
+
+        # Transpose for XLNet format: (total_slots, batch, hidden)
+        xlnet_memory = aggregated_memory.transpose(0, 1).contiguous()
+
+        # Final validation: ensure we have the expected memory length (typically 16)
+        expected_memory_length = num_experts * slots_per_expert
+        if xlnet_memory.shape[0] != expected_memory_length:
+            raise ValueError(f"Memory length mismatch. Expected {expected_memory_length}, got {xlnet_memory.shape[0]}")
+
+        return [xlnet_memory]
 
     def to_tuple(self) -> Tuple:
         """Convert to tuple for compatibility with existing code."""
