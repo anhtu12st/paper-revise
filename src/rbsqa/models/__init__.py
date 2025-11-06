@@ -64,9 +64,19 @@ class RBSModelOutput:
 
         # Validate that all expert memories have the same shape
         first_shape = expert_tensors[0].shape
+        batch_size = first_shape[0]
+
         for i, tensor in enumerate(expert_tensors[1:], 1):
             if tensor.shape != first_shape:
                 raise ValueError(f"Expert memory shapes must match. expert_0: {first_shape}, expert_{i}: {tensor.shape}")
+
+            # Additional validation: ensure batch dimension is consistent
+            if tensor.shape[0] != batch_size:
+                raise ValueError(f"Inconsistent batch sizes in expert memories: expert_0 has batch_size={batch_size}, expert_{i} has batch_size={tensor.shape[0]}")
+
+        # Validate batch size is positive
+        if batch_size <= 0:
+            raise ValueError(f"Invalid batch size {batch_size} in expert memories. Expected positive batch size.")
 
         # Stack experts along first dimension: (num_experts, batch, slots, hidden)
         stacked_experts = torch.stack(expert_tensors, dim=0)
