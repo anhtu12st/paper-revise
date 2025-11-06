@@ -317,6 +317,18 @@ class GMMXLNetForQA(nn.Module):
                 for expert_key, tensor in memory_state.items()
             }
 
+        # CRITICAL FIX: Filter out mems from kwargs to prevent tensor dimension mismatch
+        # XLNet expects mems in specific format, but GMM models handle memory differently
+        filtered_kwargs = {k: v for k, v in kwargs.items() if k != 'mems'}
+
+        if 'mems' in kwargs:
+            logger.warning("🚨 Filtering out 'mems' parameter to prevent XLNet tensor mismatch")
+            logger.warning(f"   mems type: {type(kwargs['mems'])}")
+            if isinstance(kwargs['mems'], (list, tuple)):
+                for i, mem in enumerate(kwargs['mems']):
+                    if hasattr(mem, 'shape'):
+                        logger.warning(f"   mems[{i}] shape: {mem.shape}")
+
         # Forward pass through base XLNet model
         outputs = self.base(
             input_ids=input_ids,
@@ -326,7 +338,7 @@ class GMMXLNetForQA(nn.Module):
             end_positions=end_positions,
             return_dict=True,
             output_hidden_states=True,  # Need hidden states for memory operations
-            **kwargs,
+            **filtered_kwargs,
         )
 
         # Process with GMM memory if enabled

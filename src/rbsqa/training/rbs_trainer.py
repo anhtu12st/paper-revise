@@ -106,11 +106,8 @@ class RBSTrainer(XLNetRecurrentTrainer):
         Returns:
             Computed loss for the document batch
         """
-        if hasattr(self.model, 'use_rbs_mode') and self.model.use_rbs_mode:
-            return self._process_rbs_memory_batch(time_step_batches, eval_mode)
-        else:
-            # Non-RBS model: use parent's memory processing
-            return super()._process_document_batch_with_memory(time_step_batches, eval_mode)
+        # Always use RBS processing - this method doesn't exist in parent, so we don't call super()
+        return self._process_rbs_memory_batch(time_step_batches, eval_mode)
 
     def _process_rbs_memory_batch(self, time_step_batches: List, eval_mode: bool) -> float:
         """Process memory batch for RBS models using GMM backbone format."""
@@ -184,6 +181,14 @@ class RBSTrainer(XLNetRecurrentTrainer):
 
     def _build_rbs_memory_state(self, batch: Dict, document_mask: torch.Tensor) -> Dict[str, torch.Tensor]:
         """Build RBS memory state batch using GMM format."""
+        # Enhanced logging for tensor shape debugging
+        logger.info("=" * 60)
+        logger.info("🔍 BUILDING RBS MEMORY STATE - DEBUG INFO")
+        logger.info("=" * 60)
+        logger.info(f"Batch size: {len(batch['example_ids'])}")
+        logger.info(f"Document mask: {document_mask.tolist()}")
+        logger.info(f"Active documents: {document_mask.sum().item()}")
+
         memory_state_batch = {}
         for expert_idx in range(4):  # RBS requires 4 GMM experts
             expert_memories = []
@@ -202,34 +207,50 @@ class RBSTrainer(XLNetRecurrentTrainer):
                     else:
                         expert_memory = prev[f"expert_{expert_idx}"]
 
+                # Log detailed memory info for debugging
+                logger.info(f"Expert {expert_idx}, Document {ex_id}, Active {active}:")
+                logger.info(f"  - Raw expert memory shape: {expert_memory.shape}")
+                logger.info(f"  - Raw expert memory device: {expert_memory.device}")
+                logger.info(f"  - Raw expert memory dtype: {expert_memory.dtype}")
+
                 # Ensure consistent 3D tensor shape for XLNet compatibility
                 if expert_memory.dim() == 3:  # Shape: [1, memory_slots, hidden_dim]
                     # Keep as 3D - maintain batch dimension for XLNet compatibility
                     pass  # Already correct shape
                 elif expert_memory.dim() == 2:  # Shape: [memory_slots, hidden_dim]
                     expert_memory = expert_memory.unsqueeze(0)  # -> [1, memory_slots, hidden_dim]
+                    logger.info(f"  - Reshaped from 2D to 3D: {expert_memory.shape}")
                 else:
+                    logger.error(f"  - Unexpected tensor dimensions: {expert_memory.dim()}D, shape: {expert_memory.shape}")
                     raise ValueError(f"Unexpected expert memory shape: {expert_memory.shape}, expected 2D or 3D tensor")
 
                 # Validate tensor shape
                 if expert_memory.dim() != 3 or expert_memory.shape[0] != 1:
+                    logger.error(f"  - Invalid shape after normalization: {expert_memory.shape}")
                     raise ValueError(f"Invalid expert memory shape after normalization: {expert_memory.shape}, expected [1, memory_slots, hidden_dim]")
 
+                logger.info(f"  - Final expert memory shape: {expert_memory.shape}")
                 expert_memories.append(expert_memory)
 
             # Stack expert memories across batch to create [batch_size, memory_slots, hidden_dim]
-            memory_state_batch[f"expert_{expert_idx}"] = torch.cat(expert_memories, dim=0)
+            logger.info(f"Expert {expert_idx}: Concatenating {len(expert_memories)} memories")
+            for i, mem in enumerate(expert_memories):
+                logger.info(f"  Memory {i}: shape={mem.shape}, device={mem.device}")
+
+            concatenated_tensor = torch.cat(expert_memories, dim=0)
+            logger.info(f"  Concatenated shape: {concatenated_tensor.shape}")
+            memory_state_batch[f"expert_{expert_idx}"] = concatenated_tensor
 
         # Validate batch size consistency across all experts
         expected_batch_size = len(batch["example_ids"])
 
         # Add debug logging for batch sizes
         document_mask_active = document_mask.sum().item()
-        logger.debug(f"Building memory state: expected_batch_size={expected_batch_size}, active_docs={document_mask_active}")
+        logger.info(f"Final validation: expected_batch_size={expected_batch_size}, active_docs={document_mask_active}")
 
         for expert_key, expert_tensor in memory_state_batch.items():
             actual_batch_size = expert_tensor.size(0)
-            logger.debug(f"Expert {expert_key}: shape={expert_tensor.shape}, batch_size={actual_batch_size}")
+            logger.info(f"Expert {expert_key}: shape={expert_tensor.shape}, batch_size={actual_batch_size}")
 
             if actual_batch_size != expected_batch_size:
                 # Provide more detailed error information
@@ -419,10 +440,15 @@ class RBSTrainer(XLNetRecurrentTrainer):
 
     def train_one_document_batch(self, time_step_batches: List) -> float:
         """Override train_one_document_batch to handle RBS memory structure."""
-        if hasattr(self.model, 'use_rbs_mode') and self.model.use_rbs_mode:
-            return self._process_document_batch_with_memory(time_step_batches, eval_mode=False)
-        else:
-            return super().train_one_document_batch(time_step_batches)
+        # CRITICAL FIX: Always use RBS memory processing - never fall back to parent method
+        # The parent method expects 'mems' parameter which RBS models don't support
+        logger.info("🔍 Using RBS document batch processing (never fall back to parent method)")
+
+        # Ensure we're using the correct model type for RBS
+        if not (hasattr(self.model, 'use_rbs_mode') and self.model.use_rbs_mode):
+            logger.warning("Model doesn't have use_rbs_mode=True, but using RBS processing anyway")
+
+        return self._process_document_batch_with_memory(time_step_batches, eval_mode=False)
 
     def _train_single_stage(self, train_dataloader, eval_dataloader, eval_dataset, stage_num: int):
         """Override _train_single_stage to add epoch cleanup for RBS models."""

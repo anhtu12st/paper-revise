@@ -1,0 +1,18 @@
+{
+  "timestamp": "2025-11-06 21:27:22",
+  "run_name": "test-rbs-experiment",
+  "model_name": "xlnet-base-cased",
+  "dataset_name": "squad_v2",
+  "max_seq_length": 384,
+  "doc_stride": 64,
+  "progressive_segments": null,
+  "memory": {
+    "memory_num_tokens": 8,
+    "memory_update": "gated",
+    "memory_init": "learned",
+    "memory_impl": "token",
+    "use_global_softmax": true
+  },
+  "device": "cpu",
+  "fp16": false
+}
