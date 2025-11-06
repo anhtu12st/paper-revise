@@ -222,12 +222,29 @@ class RBSTrainer(XLNetRecurrentTrainer):
 
         # Validate batch size consistency across all experts
         expected_batch_size = len(batch["example_ids"])
+
+        # Add debug logging for batch sizes
+        document_mask_active = document_mask.sum().item()
+        logger.debug(f"Building memory state: expected_batch_size={expected_batch_size}, active_docs={document_mask_active}")
+
         for expert_key, expert_tensor in memory_state_batch.items():
             actual_batch_size = expert_tensor.size(0)
+            logger.debug(f"Expert {expert_key}: shape={expert_tensor.shape}, batch_size={actual_batch_size}")
+
             if actual_batch_size != expected_batch_size:
+                # Provide more detailed error information
+                logger.error(f"Batch size mismatch detected!")
+                logger.error(f"  Expert: {expert_key}")
+                logger.error(f"  Expected batch size: {expected_batch_size}")
+                logger.error(f"  Actual batch size: {actual_batch_size}")
+                logger.error(f"  Tensor shape: {expert_tensor.shape}")
+                logger.error(f"  Document mask: {document_mask.tolist()}")
+                logger.error(f"  Example IDs: {batch['example_ids'].tolist()}")
+
                 raise ValueError(
                     f"Batch size mismatch in {expert_key}: expected {expected_batch_size}, got {actual_batch_size}. "
-                    f"Tensor shape: {expert_tensor.shape}, expected shape: [{expected_batch_size}, memory_slots, hidden_dim]"
+                    f"Tensor shape: {expert_tensor.shape}, expected shape: [{expected_batch_size}, memory_slots, hidden_dim]. "
+                    f"Active documents: {document_mask_active}, Total examples: {expected_batch_size}"
                 )
 
             # Validate tensor dimensions
@@ -300,7 +317,8 @@ class RBSTrainer(XLNetRecurrentTrainer):
                 for expert_key, expert_tensor in new_memory_state.items():
                     if expert_tensor.dim() >= 2:
                         # Extract individual example and preserve batch dimension [1, memory_slots, hidden_dim]
-                        individual_memory[expert_key] = expert_tensor[ex_idx:ex_idx+1].detach()
+                        # Use clone() instead of detach() to maintain gradient computation
+                        individual_memory[expert_key] = expert_tensor[ex_idx:ex_idx+1].clone()
                     else:
                         raise ValueError(f"Unexpected expert tensor shape: {expert_tensor.shape}")
 

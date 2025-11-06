@@ -18,6 +18,8 @@ import sys
 from pathlib import Path
 
 import torch
+# Enable anomaly detection to identify in-place operations that break gradient computation
+torch.autograd.set_detect_anomaly(True)
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
 from rbsqa.training import RBSTrainer
