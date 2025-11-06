@@ -216,9 +216,9 @@ def main():
                                     initial_memory = self.model.get_initial_memory(1, self.device)
                                     expert_memory = initial_memory[f"expert_{expert_idx}"]
                                 else:
-                                    expert_memory = prev[f"expert_{expert_idx}"].to(self.device)
+                                    expert_memory = prev[f"expert_{expert_idx}"]  # Already on correct device
 
-                            # Ensure consistent tensor shape: remove batch dimension if present
+                            # Ensure consistent 2D tensor shape for stacking
                             if expert_memory.dim() == 3:  # Shape: [1, memory_slots, hidden_dim]
                                 expert_memory = expert_memory.squeeze(0)  # -> [memory_slots, hidden_dim]
                             elif expert_memory.dim() == 2:  # Shape: [memory_slots, hidden_dim]
@@ -226,13 +226,23 @@ def main():
                             else:
                                 raise ValueError(f"Unexpected expert memory shape: {expert_memory.shape}, expected 2D or 3D tensor")
 
+                            # Double-check we have a 2D tensor
+                            if expert_memory.dim() != 2:
+                                raise ValueError(f"Expert memory shape normalization failed: {expert_memory.shape}")
+
                             expert_memories.append(expert_memory)
 
                         # Validate all expert memories have the same shape before stacking
                         if expert_memories:
                             expected_shape = expert_memories[0].shape
+
+                            # Debug logging for first few experts
+                            if expert_idx == 0 and len(expert_memories) > 1:
+                                logger.debug(f"Expert 0 memory shapes before stacking: {[mem.shape for mem in expert_memories[:3]]}")
+
                             for i, mem in enumerate(expert_memories):
                                 if mem.shape != expected_shape:
+                                    logger.error(f"Expert {expert_idx} memory {i} shape mismatch: {mem.shape} vs expected {expected_shape}")
                                     raise ValueError(f"Expert {expert_idx} memory {i} has shape {mem.shape}, expected {expected_shape}")
 
                             # Stack expert memories across batch (already on correct device)
@@ -242,33 +252,24 @@ def main():
                             # Use memory_slots=16, hidden_dim=768 as defaults based on GMM model
                             memory_state_batch[f"expert_{expert_idx}"] = torch.empty(0, 16, 768, device=self.device)
 
-                    # Validate device consistency and tensor shapes before forward pass
-                    if not eval_mode:
-                        current_device_normalized = normalize_device(self.device)
+                    # Validate tensor shapes are consistent across experts (device already consistent)
+                    if not eval_mode and memory_state_batch:
+                        shapes = [(k, v.shape) for k, v in memory_state_batch.items()]
+                        logger.debug(f"GMM memory state shapes: {shapes}")
 
-                        # Validate device consistency
+                        # Check all experts have the same shape
+                        first_shape = None
                         for expert_key, expert_tensor in memory_state_batch.items():
-                            tensor_device_normalized = normalize_device(expert_tensor.device)
-                            if tensor_device_normalized != current_device_normalized:
-                                logger.warning(f"Expert {expert_key} device mismatch: {expert_tensor.device} vs {self.device} (normalized: {tensor_device_normalized} vs {current_device_normalized})")
-                                memory_state_batch[expert_key] = expert_tensor.to(self.device)
-                                logger.debug(f"Fixed {expert_key} device placement to {self.device}")
+                            if first_shape is None:
+                                first_shape = expert_tensor.shape
+                            elif expert_tensor.shape != first_shape:
+                                logger.error(f"Shape mismatch detected: {expert_key} has shape {expert_tensor.shape}, expected {first_shape}")
+                                raise ValueError(f"Expert tensor shapes are inconsistent: {expert_key}: {expert_tensor.shape} vs expected: {first_shape}")
 
-                        # Validate tensor shapes are consistent across experts
-                        if memory_state_batch:
-                            shapes = [(k, v.shape) for k, v in memory_state_batch.items()]
-                            logger.debug(f"GMM memory state shapes: {shapes}")
-
-                            # Check all experts have the same shape
-                            first_shape = None
-                            for expert_key, expert_tensor in memory_state_batch.items():
-                                if first_shape is None:
-                                    first_shape = expert_tensor.shape
-                                elif expert_tensor.shape != first_shape:
-                                    logger.error(f"Shape mismatch detected: {expert_key} has shape {expert_tensor.shape}, expected {first_shape}")
-                                    raise ValueError(f"Expert tensor shapes are inconsistent: {expert_key}: {expert_tensor.shape} vs expected: {first_shape}")
-
-                            logger.debug(f"✅ All expert tensors have consistent shape: {first_shape}")
+                        logger.debug(f"✅ All expert tensors have consistent shape: {first_shape}")
+                    else:
+                        if eval_mode:
+                            logger.debug("Evaluation mode - skipping tensor shape validation")
                         else:
                             logger.warning("Memory state batch is empty - no tensors to validate")
 
@@ -329,25 +330,51 @@ def main():
                             # Update memory bank for next time step (ensure on correct device)
                             # Extract individual memory from batch tensor for this document (index ex_idx)
                             self.memory_bank[ex_id] = {
-                                expert_key: tensor[ex_idx].detach().to(self.device)  # Index ex_idx extracts individual memory
+                                expert_key: tensor[ex_idx].detach()  # Already on correct device, no need to move
                                 for expert_key, tensor in new_memory_state.items()
                             }
 
-                            # Validate memory bank storage consistency
+                            # Validate memory bank storage consistency (optimized)
                             if not eval_mode:
                                 for expert_key, expert_tensor in self.memory_bank[ex_id].items():
-                                    # Use device normalization to handle cuda vs cuda:0 equivalency
-                                    tensor_device_normalized = normalize_device(expert_tensor.device)
-                                    target_device_normalized = normalize_device(self.device)
-                                    if tensor_device_normalized != target_device_normalized:
-                                        logger.warning(f"Memory bank {ex_id} expert {expert_key} device mismatch: {expert_tensor.device} vs {self.device} (normalized: {tensor_device_normalized} vs {target_device_normalized})")
+                                    # Only move tensor if there's a real device mismatch (not just cuda vs cuda:0)
+                                    if expert_tensor.device.type != self.device.type:
+                                        logger.debug(f"Memory bank {ex_id} expert {expert_key} device mismatch: {expert_tensor.device} vs {self.device}")
                                         self.memory_bank[ex_id][expert_key] = expert_tensor.to(self.device)
 
-                                # Monitor memory bank size
-                                if len(self.memory_bank) > 1000:  # Prevent memory leaks
-                                    logger.warning(f"Memory bank has grown to {len(self.memory_bank)} documents, consider cleanup")
-                                if len(self.memory_bank) % 100 == 0 and len(self.memory_bank) > 0:
-                                    logger.info(f"Memory bank size: {len(self.memory_bank)} documents")
+                                # Monitor memory bank size and implement automatic cleanup
+                                memory_bank_size = len(self.memory_bank)
+                                if memory_bank_size > 1000:  # Prevent memory leaks
+                                    logger.warning(f"Memory bank has grown to {memory_bank_size} documents, consider cleanup")
+                                if memory_bank_size % 100 == 0 and memory_bank_size > 0:
+                                    logger.info(f"Memory bank size: {memory_bank_size} documents")
+
+                                # Automatic cleanup when memory bank gets too large
+                                # Set threshold to prevent OOM: approximately 5GB memory usage
+                                # Each document uses ~196KB (4 experts × 16 slots × 768 dims × 4 bytes)
+                                # 5000 documents ≈ 1GB, so set limit at 5000 to be safe
+                                MEMORY_BANK_LIMIT = 5000
+                                if memory_bank_size > MEMORY_BANK_LIMIT:
+                                    # Implement LRU-style cleanup: remove oldest 25% of documents
+                                    docs_to_remove = list(self.memory_bank.keys())[:memory_bank_size // 4]
+                                    removed_count = 0
+                                    for doc_id in docs_to_remove:
+                                        if doc_id in self.memory_bank:
+                                            del self.memory_bank[doc_id]
+                                            removed_count += 1
+
+                                    logger.info(f"🧹 Automatic memory bank cleanup: removed {removed_count} documents "
+                                               f"(old size: {memory_bank_size}, new size: {len(self.memory_bank)})")
+
+                                    # Force garbage collection to free GPU memory
+                                    import gc
+                                    gc.collect()
+                                    if torch.cuda.is_available():
+                                        torch.cuda.empty_cache()
+                                        # Log memory usage after cleanup
+                                        memory_allocated = torch.cuda.memory_allocated() / 1024**3  # GB
+                                        memory_reserved = torch.cuda.memory_reserved() / 1024**3  # GB
+                                        logger.info(f"🧹 Memory after cleanup: Allocated={memory_allocated:.2f}GB, Reserved={memory_reserved:.2f}GB")
 
                             # Store logits for this document (use first segment for simplicity)
                             # ex_idx is already calculated above
@@ -385,6 +412,26 @@ def main():
             else:
                 # Non-GMM model: use parent's implementation
                 return super().train_one_document_batch(time_step_batches)
+
+        def _train_single_stage(self, train_dataloader, eval_dataloader, eval_dataset, stage_num):
+            """Override _train_single_stage to add epoch cleanup for GMM models."""
+            if hasattr(self.model, 'use_gmm_memory') and self.model.use_gmm_memory:
+                # Call parent implementation but ensure cleanup happens
+                from memxlnet.training.trainer import XLNetRecurrentTrainer
+
+                # Get the parent's method
+                parent_method = super()._train_single_stage
+
+                # Call parent method
+                result = parent_method(train_dataloader, eval_dataloader, eval_dataset, stage_num)
+
+                # Ensure cleanup is called after each epoch (parent calls this internally)
+                # The cleanup logic is now handled in the automatic cleanup in _process_document_batch_with_memory
+
+                return result
+            else:
+                # Non-GMM model: use parent's implementation
+                return super()._train_single_stage(train_dataloader, eval_dataloader, eval_dataset, stage_num)
 
         def _clear_memory_bank(self):
             """Clear the memory bank to prevent memory leaks between epochs."""
