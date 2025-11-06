@@ -24,6 +24,30 @@ class RBSModelOutput:
     hidden_states: Optional[Tuple[torch.Tensor]] = None
     attentions: Optional[Tuple[torch.Tensor]] = None
 
+    @property
+    def mems(self) -> List[torch.Tensor]:
+        """
+        Convert memory_state to the format expected by base trainer (list of tensors).
+
+        This provides backward compatibility with existing trainer code that expects
+        outputs.mems to be a list of memory tensors.
+
+        Returns:
+            List of memory tensors in the format expected by XLNet trainer
+        """
+        if not self.memory_state:
+            return []
+
+        # Convert GMM-style memory dictionary to list format
+        # Extract expert memories in order: expert_0, expert_1, ...
+        mems_list = []
+        for i in range(len(self.memory_state)):
+            expert_key = f"expert_{i}"
+            if expert_key in self.memory_state:
+                mems_list.append(self.memory_state[expert_key])
+
+        return mems_list
+
     def to_tuple(self) -> Tuple:
         """Convert to tuple for compatibility with existing code."""
         return (
