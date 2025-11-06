@@ -220,6 +220,31 @@ class RBSTrainer(XLNetRecurrentTrainer):
             # Stack expert memories across batch to create [batch_size, memory_slots, hidden_dim]
             memory_state_batch[f"expert_{expert_idx}"] = torch.cat(expert_memories, dim=0)
 
+        # Validate batch size consistency across all experts
+        expected_batch_size = len(batch["example_ids"])
+        for expert_key, expert_tensor in memory_state_batch.items():
+            actual_batch_size = expert_tensor.size(0)
+            if actual_batch_size != expected_batch_size:
+                raise ValueError(
+                    f"Batch size mismatch in {expert_key}: expected {expected_batch_size}, got {actual_batch_size}. "
+                    f"Tensor shape: {expert_tensor.shape}, expected shape: [{expected_batch_size}, memory_slots, hidden_dim]"
+                )
+
+            # Validate tensor dimensions
+            if expert_tensor.dim() != 3:
+                raise ValueError(
+                    f"Invalid tensor dimensions for {expert_key}: {expert_tensor.dim()}D, expected 3D. "
+                    f"Tensor shape: {expert_tensor.shape}"
+                )
+
+        # Validate that all experts have the same shape
+        expert_shapes = [tensor.shape for tensor in memory_state_batch.values()]
+        if len(set(expert_shapes)) > 1:
+            raise ValueError(
+                f"Inconsistent expert memory shapes detected: {expert_shapes}. "
+                f"All experts must have identical shapes."
+            )
+
         return memory_state_batch
 
     def _handle_device_placement_error(self, error: RuntimeError, input_ids: torch.Tensor,
@@ -294,6 +319,7 @@ class RBSTrainer(XLNetRecurrentTrainer):
     def _validate_memory_storage(self, ex_id: str, eval_mode: bool) -> None:
         """Validate memory bank storage and handle cleanup."""
         # Validate memory tensor shapes and device consistency
+        expert_shapes = []
         for expert_key, expert_tensor in self.memory_bank[ex_id].items():
             # Check tensor dimensions
             if expert_tensor.dim() != 3:
@@ -303,10 +329,17 @@ class RBSTrainer(XLNetRecurrentTrainer):
             if expert_tensor.shape[0] != 1:
                 raise ValueError(f"Invalid batch dimension for {ex_id} {expert_key}: {expert_tensor.shape[0]}, expected 1")
 
+            # Collect shapes for consistency check
+            expert_shapes.append(expert_tensor.shape)
+
             # Check device consistency
             if expert_tensor.device.type != self.device.type:
                 logger.debug(f"Memory bank {ex_id} expert {expert_key} device mismatch: {expert_tensor.device} vs {self.device}")
                 self.memory_bank[ex_id][expert_key] = expert_tensor.to(self.device)
+
+        # Validate that all experts have consistent shapes for this document
+        if len(set(expert_shapes)) > 1:
+            raise ValueError(f"Inconsistent expert memory shapes for document {ex_id}: {expert_shapes}. All experts must have identical shapes.")
 
         # Monitor memory bank size and implement cleanup
         memory_bank_size = len(self.memory_bank)
