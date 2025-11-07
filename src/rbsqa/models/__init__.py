@@ -23,6 +23,7 @@ class RBSModelOutput:
     segment_info: Optional[Dict] = None
     hidden_states: Optional[Tuple[torch.Tensor]] = None
     attentions: Optional[Tuple[torch.Tensor]] = None
+    loss: Optional[torch.Tensor] = None
 
     @property
     def mems(self) -> List[torch.Tensor]:

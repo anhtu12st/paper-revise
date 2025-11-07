@@ -130,6 +130,8 @@ class RBSXLNetForQA(nn.Module):
     def forward(self,
                 input_ids: torch.Tensor,
                 attention_mask: torch.Tensor,
+                start_positions: Optional[torch.Tensor] = None,
+                end_positions: Optional[torch.Tensor] = None,
                 memory_state: Optional[Dict[str, torch.Tensor]] = None,
                 segment_info: Optional[Dict] = None,
                 return_dict: bool = True,
@@ -140,6 +142,8 @@ class RBSXLNetForQA(nn.Module):
         Args:
             input_ids: Token IDs [batch_size, seq_len]
             attention_mask: Attention mask [batch_size, seq_len]
+            start_positions: Start position labels for training loss computation [batch_size]
+            end_positions: End position labels for training loss computation [batch_size]
             memory_state: Previous GMM memory state (for recurrent processing)
             segment_info: Information about current segment (id, offset, etc.)
             return_dict: Whether to return structured output
@@ -150,11 +154,13 @@ class RBSXLNetForQA(nn.Module):
 
         if self.config.use_rbs_mode and segment_info is not None:
             result = self._rbs_forward(
-                input_ids, attention_mask, memory_state, segment_info, **kwargs
+                input_ids, attention_mask, memory_state, segment_info,
+                start_positions, end_positions, **kwargs
             )
         else:
             result = self._legacy_forward(
-                input_ids, attention_mask, memory_state, **kwargs
+                input_ids, attention_mask, memory_state,
+                start_positions, end_positions, **kwargs
             )
 
         # Return as tuple if requested
@@ -168,6 +174,8 @@ class RBSXLNetForQA(nn.Module):
                     attention_mask: torch.Tensor,
                     memory_state: Optional[Dict[str, torch.Tensor]],
                     segment_info: Dict,
+                    start_positions: Optional[torch.Tensor] = None,
+                    end_positions: Optional[torch.Tensor] = None,
                     **kwargs) -> "RBSModelOutput":
         """RBS mode forward pass with belief tracking and halting decisions."""
 
@@ -184,6 +192,8 @@ class RBSXLNetForQA(nn.Module):
         gmm_outputs = self.gmm_backbone(
             input_ids=input_ids,
             attention_mask=attention_mask,
+            start_positions=start_positions,
+            end_positions=end_positions,
             memory_state=memory_state,
             mem_read_ids=mem_read_ids,
             mem_write_ids=mem_write_ids,
@@ -293,13 +303,16 @@ class RBSXLNetForQA(nn.Module):
             halting_decision=halting_decision,
             segment_info=segment_info,
             hidden_states=gmm_outputs.get("hidden_states"),
-            attentions=gmm_outputs.get("attentions")
+            attentions=gmm_outputs.get("attentions"),
+            loss=gmm_outputs.get("loss")
         )
 
     def _legacy_forward(self,
                        input_ids: torch.Tensor,
                        attention_mask: torch.Tensor,
                        memory_state: Optional[Dict[str, torch.Tensor]],
+                       start_positions: Optional[torch.Tensor] = None,
+                       end_positions: Optional[torch.Tensor] = None,
                        **kwargs) -> "RBSModelOutput":
         """Legacy GMM mode forward pass (backward compatibility)."""
 
@@ -356,6 +369,8 @@ class RBSXLNetForQA(nn.Module):
         gmm_outputs = self.gmm_backbone(
             input_ids=input_ids,
             attention_mask=attention_mask,
+            start_positions=start_positions,
+            end_positions=end_positions,
             memory_state=memory_state,
             mem_read_ids=mem_read_ids,
             mem_write_ids=mem_write_ids,
@@ -410,7 +425,8 @@ class RBSXLNetForQA(nn.Module):
             halting_decision=None,
             segment_info=None,
             hidden_states=gmm_outputs.get("hidden_states"),
-            attentions=gmm_outputs.get("attentions")
+            attentions=gmm_outputs.get("attentions"),
+            loss=gmm_outputs.get("loss")
         )
 
     def adaptive_inference(self,
