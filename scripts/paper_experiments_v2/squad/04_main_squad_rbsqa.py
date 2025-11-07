@@ -89,7 +89,7 @@ def create_config():
         warmup_ratio=0.1,
         max_grad_norm=1.0,
         gradient_accumulation_steps=1,
-        eval_steps=50000,  # TODO: change back to 5000
+        eval_steps=500,  # TODO: change back to 5000
         save_steps=10000,
         logging_steps=500,
         output_dir="./outputs/paper_v2_squad_rbsqa_main",
