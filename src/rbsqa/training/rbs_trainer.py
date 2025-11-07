@@ -456,10 +456,6 @@ class RBSTrainer(XLNetRecurrentTrainer):
         # The parent method expects 'mems' parameter which RBS models don't support
         logger.debug("🔍 Using RBS document batch processing (never fall back to parent method)")
 
-        # Ensure we're using the correct model type for RBS
-        if not (hasattr(self.model, 'use_rbs_mode') and self.model.use_rbs_mode):
-            logger.warning("Model doesn't have use_rbs_mode=True, but using RBS processing anyway")
-
         return self._process_document_batch_with_memory(time_step_batches, eval_mode=False)
 
     def _train_single_stage(self, train_dataloader, eval_dataloader, eval_dataset, stage_num: int):
